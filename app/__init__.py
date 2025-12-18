@@ -17,8 +17,10 @@ def create_app(config_name="default"):
         from app.config import ProductionConfig as ConfigClass
     elif config_name == "development":
         from app.config import DevelopmentConfig as ConfigClass
+    elif config_name == "testing":
+        from app.config import TestingConfig as ConfigClass
     else:
-        from app.config import Config as ConfigClass
+        from app.config import DevelopmentConfig as ConfigClass
 
     app.config.from_object(ConfigClass)
 
@@ -31,6 +33,14 @@ def create_app(config_name="default"):
     from app.policy.opa_client import init_opa_client
 
     init_opa_client(app)
+
+    # Initialize Service Communicator
+    try:
+        from app.services.service_communicator import init_service_communicator
+
+        init_service_communicator(app)
+    except ImportError as e:
+        app.logger.warning(f"Service communicator not available: {e}")
 
     # Register blueprints
     from app.auth.routes import auth_bp

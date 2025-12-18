@@ -10,6 +10,7 @@ class Config:
         "DATABASE_URL", "sqlite:///government_zta.db"
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    # JWT
     JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "jwt-government-secure-key-2024")
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=8)
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=30)
@@ -17,6 +18,35 @@ class Config:
     # OPA Configuration
     OPA_URL = os.environ.get("OPA_URL", "http://localhost:8181")
     OPA_TIMEOUT = int(os.environ.get("OPA_TIMEOUT", 5))
+
+    # SERVICE COMMUNICATION
+    API_SERVER_URL = os.environ.get("API_SERVER_URL", "http://localhost:5000")
+
+    # Service tokens for communication between services
+    SERVICE_TOKEN = os.environ.get("SERVICE_TOKEN", "server1-service-token-2024-zta")
+    OPA_SERVICE_TOKEN = os.environ.get("OPA_SERVICE_TOKEN", "opa-agent-token-2024-zta")
+
+    # Service roles
+    SERVER1_ROLE = "server1"
+    OPA_AGENT_ROLE = "opa_agent"
+    API_SERVER_ROLE = "api_server"
+
+    # Service communication timeout
+    SERVICE_TIMEOUT = int(os.environ.get("SERVICE_TIMEOUT", 10))
+
+    # Service-to-service mTLS settings
+    SERVICE_MTLS_ENABLED = (
+        os.environ.get("SERVICE_MTLS_ENABLED", "true").lower() == "true"
+    )
+    SERVICE_CERT_DIR = os.environ.get("SERVICE_CERT_DIR", "./certs/services")
+
+    # Service communication headers
+    SERVICE_HEADERS = {
+        "X-Service-Role": SERVER1_ROLE,
+        "X-Service-Token": SERVICE_TOKEN,
+        "X-Request-Source": "server1",
+        "Content-Type": "application/json",
+    }
 
     # mTLS Configuration
     SSL_CERT_PATH = os.environ.get("SSL_CERT_PATH", "./certs")

@@ -2,8 +2,6 @@ from app import db
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
 
-# REMOVE THIS LINE: from app.models.user import User, GovernmentDocument, AccessLog, Facility, Department
-# This line is causing the circular import!
 
 
 class User(db.Model):

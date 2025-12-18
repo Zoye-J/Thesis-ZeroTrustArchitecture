@@ -2,45 +2,817 @@
 
 {% block title %}Document Management - Government System{% endblock %}
 
+{% block extra_css %}
+<style>
+    .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 2rem;
+    }
+    
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 2rem;
+        padding-bottom: 1rem;
+        border-bottom: 2px solid #e0e0e0;
+    }
+    
+    .page-header h1 {
+        color: #1a237e;
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .btn-primary {
+        background: #1a237e;
+        color: white;
+        border: none;
+        padding: 0.75rem 1.5rem;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 1rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .btn-secondary {
+        background: #6c757d;
+        color: white;
+        border: none;
+        padding: 0.5rem 1rem;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 0.9rem;
+    }
+    
+    .filters {
+        background: #f8f9fa;
+        padding: 1.5rem;
+        border-radius: 10px;
+        margin-bottom: 2rem;
+    }
+    
+    .filter-row {
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+        margin-bottom: 1rem;
+    }
+    
+    .filter-group {
+        flex: 1;
+        min-width: 200px;
+    }
+    
+    .filter-group label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: bold;
+        color: #333;
+    }
+    
+    .filter-select {
+        width: 100%;
+        padding: 0.5rem;
+        border: 2px solid #ddd;
+        border-radius: 5px;
+        background: white;
+    }
+    
+    .documents-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        gap: 1.5rem;
+    }
+    
+    .document-card {
+        background: white;
+        border-radius: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        border: 1px solid #e0e0e0;
+        overflow: hidden;
+        transition: transform 0.2s;
+    }
+    
+    .document-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+    }
+    
+    .document-header {
+        padding: 1rem;
+        border-bottom: 1px solid #e0e0e0;
+        background: #f8f9fa;
+    }
+    
+    .document-title {
+        font-size: 1.1rem;
+        font-weight: bold;
+        color: #1a237e;
+        margin: 0 0 0.5rem 0;
+    }
+    
+    .document-id {
+        font-size: 0.8rem;
+        color: #666;
+        font-family: monospace;
+    }
+    
+    .document-body {
+        padding: 1rem;
+    }
+    
+    .document-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+    }
+    
+    .meta-badge {
+        display: inline-block;
+        padding: 0.25rem 0.5rem;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        font-weight: bold;
+    }
+    
+    .badge-classification-top_secret { background: #9c27b0; color: white; }
+    .badge-classification-secret { background: #f44336; color: white; }
+    .badge-classification-confidential { background: #ff9800; color: white; }
+    .badge-classification-basic { background: #4caf50; color: white; }
+    
+    .badge-department { background: #2196f3; color: white; }
+    .badge-facility { background: #673ab7; color: white; }
+    .badge-category { background: #009688; color: white; }
+    
+    .document-description {
+        color: #666;
+        font-size: 0.9rem;
+        margin-bottom: 1rem;
+        line-height: 1.4;
+    }
+    
+    .document-actions {
+        display: flex;
+        gap: 0.5rem;
+        padding-top: 1rem;
+        border-top: 1px solid #e0e0e0;
+    }
+    
+    .btn-view, .btn-download {
+        flex: 1;
+        text-align: center;
+        padding: 0.5rem;
+        border-radius: 5px;
+        text-decoration: none;
+        font-size: 0.9rem;
+    }
+    
+    .btn-view {
+        background: #1a237e;
+        color: white;
+    }
+    
+    .btn-download {
+        background: #4caf50;
+        color: white;
+    }
+    
+    .empty-state {
+        text-align: center;
+        padding: 3rem;
+        color: #666;
+        grid-column: 1 / -1;
+    }
+    
+    .loading {
+        text-align: center;
+        padding: 3rem;
+        color: #666;
+        grid-column: 1 / -1;
+    }
+    
+    .alert {
+        padding: 1rem;
+        border-radius: 5px;
+        margin-bottom: 1rem;
+    }
+    
+    .alert-info {
+        background: #e3f2fd;
+        color: #1565c0;
+        border: 1px solid #bbdefb;
+    }
+    
+    .alert-error {
+        background: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+    }
+    
+    .create-document-modal {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.5);
+        z-index: 1000;
+        align-items: center;
+        justify-content: center;
+    }
+    
+    .modal-content {
+        background: white;
+        width: 90%;
+        max-width: 600px;
+        border-radius: 10px;
+        max-height: 90vh;
+        overflow-y: auto;
+    }
+    
+    .modal-header {
+        padding: 1.5rem;
+        border-bottom: 1px solid #e0e0e0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    
+    .modal-body {
+        padding: 1.5rem;
+    }
+    
+    .modal-footer {
+        padding: 1.5rem;
+        border-top: 1px solid #e0e0e0;
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.5rem;
+    }
+    
+    .form-group {
+        margin-bottom: 1rem;
+    }
+    
+    .form-group label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: bold;
+    }
+    
+    .form-control {
+        width: 100%;
+        padding: 0.75rem;
+        border: 2px solid #ddd;
+        border-radius: 5px;
+        font-size: 1rem;
+    }
+    
+    textarea.form-control {
+        min-height: 100px;
+        resize: vertical;
+    }
+    
+    .close-modal {
+        background: none;
+        border: none;
+        font-size: 1.5rem;
+        cursor: pointer;
+        color: #666;
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="container">
-    <h1>📋 Document Management</h1>
-    <p>This page will allow you to create, view, and manage government documents.</p>
+    <div class="page-header">
+        <h1>📋 Government Documents</h1>
+        <button class="btn-primary" onclick="openCreateModal()">
+            + New Document
+        </button>
+    </div>
     
-    <div style="background: #f8f9fa; padding: 2rem; border-radius: 10px; margin-top: 2rem;">
-        <h3>Feature Under Development</h3>
-        <p>The document management interface is currently being implemented.</p>
-        <p>For now, you can use the API endpoints:</p>
-        <ul>
-            <li><code>GET /api/documents</code> - List documents</li>
-            <li><code>POST /api/documents</code> - Create new document</li>
-            <li><code>GET /api/documents/{id}</code> - View specific document</li>
-        </ul>
-        <button onclick="window.location.href='/dashboard'">← Back to Dashboard</button>
+    <div class="filters">
+        <h3 style="margin-top: 0; margin-bottom: 1rem;">Filters</h3>
+        <div class="filter-row">
+            <div class="filter-group">
+                <label>Classification</label>
+                <select class="filter-select" id="filterClassification" onchange="loadDocuments()">
+                    <option value="">All Classifications</option>
+                    <option value="BASIC">BASIC</option>
+                    <option value="CONFIDENTIAL">CONFIDENTIAL</option>
+                    <option value="SECRET">SECRET</option>
+                    <option value="TOP_SECRET">TOP_SECRET</option>
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <label>Department</label>
+                <select class="filter-select" id="filterDepartment" onchange="loadDocuments()">
+                    <option value="">All Departments</option>
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <label>Category</label>
+                <select class="filter-select" id="filterCategory" onchange="loadDocuments()">
+                    <option value="">All Categories</option>
+                </select>
+            </div>
+        </div>
+        
+        <div class="filter-row">
+            <div class="filter-group">
+                <label>Search</label>
+                <input type="text" class="form-control" id="filterSearch" 
+                       placeholder="Search by title or ID..." oninput="loadDocuments()">
+            </div>
+        </div>
+    </div>
+    
+    <div id="alertArea"></div>
+    
+    <div id="documentsContainer" class="loading">
+        Loading documents...
     </div>
 </div>
 
-<style>
-.container {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 2rem;
+<!-- Create Document Modal -->
+<div id="createDocumentModal" class="create-document-modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2 style="margin: 0;">Create New Document</h2>
+            <button class="close-modal" onclick="closeCreateModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <form id="createDocumentForm">
+                <div class="form-group">
+                    <label for="docTitle">Title *</label>
+                    <input type="text" id="docTitle" class="form-control" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="docDescription">Description</label>
+                    <textarea id="docDescription" class="form-control"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="docContent">Content *</label>
+                    <textarea id="docContent" class="form-control" required 
+                              placeholder="Enter document content here..."></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="docClassification">Classification *</label>
+                    <select id="docClassification" class="form-control" required>
+                        <option value="BASIC">BASIC</option>
+                        <option value="CONFIDENTIAL">CONFIDENTIAL</option>
+                        <option value="SECRET">SECRET</option>
+                        <option value="TOP_SECRET">TOP_SECRET</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="docCategory">Category *</label>
+                    <select id="docCategory" class="form-control" required>
+                        <option value="">Select Category</option>
+                        <option value="Budget">Budget</option>
+                        <option value="Personnel">Personnel</option>
+                        <option value="Operations">Operations</option>
+                        <option value="Intelligence">Intelligence</option>
+                        <option value="Finance">Finance</option>
+                        <option value="Procurement">Procurement</option>
+                        <option value="Security">Security</option>
+                        <option value="Technology">Technology</option>
+                        <option value="Policy">Policy</option>
+                        <option value="Other">Other</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="docExpiry">Expiry Date (Optional)</label>
+                    <input type="date" id="docExpiry" class="form-control">
+                </div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-secondary" onclick="closeCreateModal()">Cancel</button>
+            <button class="btn-primary" onclick="createDocument()">Create Document</button>
+        </div>
+    </div>
+</div>
+
+<script>
+// Global variables
+let userInfo = null;
+let currentDocuments = [];
+
+// Load user info and documents
+async function initPage() {
+    try {
+        const token = localStorage.getItem('access_token');
+        if (!token) {
+            window.location.href = '/';
+            return;
+        }
+
+        // Get user info
+        const userResponse = await fetch('/api/auth/me', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (userResponse.status === 401) {
+            localStorage.removeItem('access_token');
+            window.location.href = '/';
+            return;
+        }
+
+        if (!userResponse.ok) {
+            throw new Error('Failed to get user info');
+        }
+
+        const userData = await userResponse.json();
+        if (!userData.authenticated) {
+            window.location.href = '/';
+            return;
+        }
+
+        userInfo = userData.user;
+        document.title = `Documents - ${userInfo.department}`;
+        
+        // Load documents
+        await loadDocuments();
+        
+    } catch (error) {
+        console.error('Initialization error:', error);
+        showAlert('Error loading page: ' + error.message, 'error');
+    }
 }
 
-h1 {
-    color: #1a237e;
-    margin-bottom: 1rem;
+// Load documents from API
+async function loadDocuments() {
+    try {
+        const token = localStorage.getItem('access_token');
+        if (!token) return;
+
+        // Build query string from filters
+        const filters = {
+            classification: document.getElementById('filterClassification').value,
+            department: document.getElementById('filterDepartment').value,
+            category: document.getElementById('filterCategory').value,
+            search: document.getElementById('filterSearch').value
+        };
+
+        let queryString = '';
+        if (filters.search) queryString += `search=${encodeURIComponent(filters.search)}&`;
+        if (filters.classification) queryString += `classification=${filters.classification}&`;
+        if (filters.department) queryString += `department=${filters.department}&`;
+        if (filters.category) queryString += `category=${filters.category}&`;
+
+        document.getElementById('documentsContainer').innerHTML = '<div class="loading">Loading documents...</div>';
+
+        const response = await fetch(`/api/documents?${queryString}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (response.status === 401) {
+            window.location.href = '/';
+            return;
+        }
+
+        if (!response.ok) {
+            throw new Error(`API error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        currentDocuments = data.documents || [];
+
+        renderDocuments();
+        updateFilterOptions();
+
+    } catch (error) {
+        console.error('Error loading documents:', error);
+        document.getElementById('documentsContainer').innerHTML = `
+            <div class="empty-state">
+                <h3>Error Loading Documents</h3>
+                <p>${error.message}</p>
+                <button class="btn-secondary" onclick="loadDocuments()">Retry</button>
+            </div>
+        `;
+    }
 }
 
-button {
-    background: #1a237e;
-    color: white;
-    border: none;
-    padding: 0.75rem 1.5rem;
-    border-radius: 5px;
-    cursor: pointer;
-    font-size: 1rem;
-    margin-top: 1rem;
+// Render documents in grid
+function renderDocuments() {
+    const container = document.getElementById('documentsContainer');
+    
+    if (currentDocuments.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <h3>No Documents Found</h3>
+                <p>No documents match your current filters.</p>
+                <button class="btn-primary" onclick="openCreateModal()">
+                    Create Your First Document
+                </button>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = '<div class="documents-grid"></div>';
+    const grid = container.querySelector('.documents-grid');
+
+    currentDocuments.forEach(doc => {
+        const card = createDocumentCard(doc);
+        grid.appendChild(card);
+    });
 }
-</style>
+
+// Create a document card element
+function createDocumentCard(doc) {
+    const card = document.createElement('div');
+    card.className = 'document-card';
+    
+    // Format date
+    const createdDate = new Date(doc.created_at).toLocaleDateString();
+    
+    // Get classification badge class
+    const classificationClass = `badge-classification-${doc.classification.toLowerCase().replace('_', '')}`;
+    
+    card.innerHTML = `
+        <div class="document-header">
+            <h3 class="document-title">${escapeHtml(doc.title)}</h3>
+            <div class="document-id">${doc.document_id}</div>
+        </div>
+        <div class="document-body">
+            <div class="document-meta">
+                <span class="meta-badge ${classificationClass}">${doc.classification}</span>
+                <span class="meta-badge badge-department">${doc.department}</span>
+                <span class="meta-badge badge-facility">${doc.facility}</span>
+                ${doc.category ? `<span class="meta-badge badge-category">${doc.category}</span>` : ''}
+            </div>
+            <p class="document-description">${escapeHtml(doc.description || 'No description provided')}</p>
+            <div style="color: #666; font-size: 0.8rem; margin-bottom: 1rem;">
+                Created: ${createdDate}
+            </div>
+            <div class="document-actions">
+                <a href="#" class="btn-view" onclick="viewDocument(${doc.id}); return false;">View</a>
+                <a href="#" class="btn-download" onclick="downloadDocument(${doc.id}); return false;">Download</a>
+            </div>
+        </div>
+    `;
+    
+    return card;
+}
+
+// Update filter dropdown options
+function updateFilterOptions() {
+    const deptSelect = document.getElementById('filterDepartment');
+    const categorySelect = document.getElementById('filterCategory');
+    
+    // Get unique departments and categories
+    const departments = [...new Set(currentDocuments.map(d => d.department))];
+    const categories = [...new Set(currentDocuments.map(d => d.category).filter(c => c))];
+    
+    // Update department filter
+    deptSelect.innerHTML = '<option value="">All Departments</option>';
+    departments.forEach(dept => {
+        if (dept) {
+            deptSelect.innerHTML += `<option value="${dept}">${dept}</option>`;
+        }
+    });
+    
+    // Update category filter
+    categorySelect.innerHTML = '<option value="">All Categories</option>';
+    categories.forEach(cat => {
+        if (cat) {
+            categorySelect.innerHTML += `<option value="${cat}">${cat}</option>`;
+        }
+    });
+}
+
+// View document details
+async function viewDocument(documentId) {
+    try {
+        const token = localStorage.getItem('access_token');
+        if (!token) return;
+        
+        const response = await fetch(`/api/documents/${documentId}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            showDocumentModal(data.document);
+        } else {
+            const error = await response.json();
+            showAlert(`Error: ${error.error || 'Failed to view document'}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error viewing document:', error);
+        showAlert('Error viewing document: ' + error.message, 'error');
+    }
+}
+
+// Show document details in modal
+// Show document details in modal
+function showDocumentModal(docData) {
+    console.log("Document data for modal:", docData);
+    
+    const modal = document.createElement('div');
+    modal.className = 'create-document-modal';
+    modal.style.display = 'flex';
+    
+    const createdDate = new Date(docData.created_at).toLocaleString();
+    
+    // FIX: Use docData.classification instead of document.classification
+    const classification = docData.classification || 'BASIC';
+    const classificationClass = `badge-classification-${classification.toLowerCase().replace('_', '')}`;
+    
+    modal.innerHTML = `
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 style="margin: 0;">${escapeHtml(docData.title || 'Untitled Document')}</h2>
+                <button class="close-modal" onclick="this.parentElement.parentElement.remove()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="margin-bottom: 1.5rem;">
+                    <div class="document-meta">
+                        <span class="meta-badge ${classificationClass}">${classification}</span>
+                        <span class="meta-badge badge-department">${docData.department || 'Unknown'}</span>
+                        <span class="meta-badge badge-facility">${docData.facility || 'Unknown'}</span>
+                        ${docData.category ? `<span class="meta-badge badge-category">${docData.category}</span>` : ''}
+                    </div>
+                    <div style="margin-top: 0.5rem; color: #666; font-size: 0.9rem;">
+                        Document ID: ${docData.document_id || docData.id || 'N/A'}<br>
+                        Created: ${createdDate}
+                    </div>
+                </div>
+                
+                <div style="margin-bottom: 1.5rem;">
+                    <h4>Description</h4>
+                    <p>${escapeHtml(docData.description || 'No description provided')}</p>
+                </div>
+                
+                <div>
+                    <h4>Content</h4>
+                    <div style="background: #f8f9fa; padding: 1rem; border-radius: 5px; white-space: pre-wrap;">
+                        ${escapeHtml(docData.content || 'No content')}
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="this.parentElement.parentElement.remove()">Close</button>
+                <button class="btn-primary" onclick="downloadDocument(${docData.id})">Download</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+// Download document
+// Add this function to your documents.html JavaScript if it doesn't exist:
+// Download document - FIXED: Changed parameter name to avoid conflict
+async function downloadDocument(docId) {  // Changed from documentId to docId
+    try {
+        const token = localStorage.getItem('access_token');
+        if (!token) {
+            window.location.href = '/';
+            return;
+        }
+        
+        const response = await fetch(`/api/documents/${docId}`, {  // Use docId here
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            const doc = data.document || data;  // Changed variable name from document to doc
+            
+            // Create download content
+            const content = `
+TITLE: ${doc.title || 'Untitled'}
+DOCUMENT ID: ${doc.document_id || doc.id}
+CLASSIFICATION: ${doc.classification || 'BASIC'}
+DEPARTMENT: ${doc.department || 'Unknown'}
+FACILITY: ${doc.facility || 'Unknown'}
+CATEGORY: ${doc.category || 'N/A'}
+CREATED: ${new Date(doc.created_at || new Date()).toLocaleString()}
+DESCRIPTION: ${doc.description || 'N/A'}
+CONTENT:
+${doc.content || 'No content'}
+
+--- END OF DOCUMENT ---
+ACCESSED: ${new Date().toLocaleString()}
+            `;
+            
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');  // This is safe now - refers to global document object
+            a.href = url;
+            a.download = `${doc.document_id || 'document'}.txt`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+            
+        } else {
+            const error = await response.json();
+            showAlert(`Error: ${error.error || 'Failed to download document'}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error downloading document:', error);
+        showAlert('Error downloading document: ' + error.message, 'error');
+    }
+}
+// Modal functions
+function openCreateModal() {
+    document.getElementById('createDocumentModal').style.display = 'flex';
+}
+
+function closeCreateModal() {
+    document.getElementById('createDocumentModal').style.display = 'none';
+    document.getElementById('createDocumentForm').reset();
+}
+
+// Create new document
+async function createDocument() {
+    try {
+        const token = localStorage.getItem('access_token');
+        if (!token) return;
+
+        const title = document.getElementById('docTitle').value;
+        const description = document.getElementById('docDescription').value;
+        const content = document.getElementById('docContent').value;
+        const classification = document.getElementById('docClassification').value;
+        const category = document.getElementById('docCategory').value;
+        const expiryDate = document.getElementById('docExpiry').value;
+
+        if (!title || !content || !classification || !category) {
+            showAlert('Please fill all required fields', 'error');
+            return;
+        }
+
+        const response = await fetch('/api/documents', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                title,
+                description,
+                content,
+                classification,
+                category,
+                expiry_date: expiryDate || null
+            })
+        });
+
+        if (response.ok) {
+            showAlert('Document created successfully!', 'info');
+            closeCreateModal();
+            await loadDocuments();
+        } else {
+            const error = await response.json();
+            showAlert(`Error: ${error.error || 'Failed to create document'}`, 'error');
+        }
+
+    } catch (error) {
+        console.error('Error creating document:', error);
+        showAlert('Error creating document: ' + error.message, 'error');
+    }
+}
+
+// Utility functions
+function showAlert(message, type) {
+    const alertArea = document.getElementById('alertArea');
+    alertArea.innerHTML = `
+        <div class="alert alert-${type}">
+            ${message}
+        </div>
+    `;
+    
+    setTimeout(() => {
+        alertArea.innerHTML = '';
+    }, 5000);
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Initialize page
+document.addEventListener('DOMContentLoaded', initPage);
+</script>
 {% endblock %}

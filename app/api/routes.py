@@ -12,6 +12,7 @@ import hashlib
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 
+
 api_bp = Blueprint("api", __name__)
 
 
@@ -378,6 +379,18 @@ def get_dashboard_stats():
 def get_documents_list():  # CHANGED NAME
     """Get documents list - accepts either mTLS or JWT"""
     try:
+        from app.middleware.zta_flow_middleware import (
+            log_zta_flow_start,
+            log_opa_to_api_server,
+            log_api_to_server1,
+            log_server1_to_user,
+            log_zta_flow_complete,
+        )
+
+        # Get request ID from g (added by middleware) or generate one
+        request_id = getattr(g, "request_id", str(uuid.uuid4()))
+        g.request_id = request_id
+
         request_id = getattr(g, "request_id", str(uuid.uuid4()))
         claims = get_user_claims()
 
@@ -389,6 +402,12 @@ def get_documents_list():  # CHANGED NAME
             )
             return jsonify({"error": "Authentication required"}), 401
 
+        log_zta_flow_start(
+            claims,
+            {"type": "document_list", "facility": claims.get("facility")},
+            "read",
+        )
+
         user_id = claims["sub"]
         user_class = claims["user_class"]
         user_facility = claims.get("facility")
@@ -397,6 +416,10 @@ def get_documents_list():  # CHANGED NAME
 
         # Get OPA client
         opa_client = get_opa_client()
+
+        from app.services.service_communicator import get_service_communicator
+
+        communicator = get_service_communicator()
 
         # Log document list access attempt
         zta_logger.log_event(
@@ -517,11 +540,17 @@ def get_documents_list():  # CHANGED NAME
                     result = opa_client.evaluate_with_time_restrictions(
                         opa_input, request_id
                     )
-                    
+
                     allowed = result.get("overall_allow", False)
                     reason = result.get("reason", "Policy evaluation complete")
 
-                    is_time_restricted = "outside business hours" in reason or "9 PM" in reason or "8 AM" in reason
+                    is_time_restricted = (
+                        "outside business hours" in reason
+                        or "9 PM" in reason
+                        or "8 AM" in reason
+                    )
+
+                    log_opa_to_api_server(request_id, result)
 
                     if allowed:
                         opa_allows += 1
@@ -534,7 +563,8 @@ def get_documents_list():  # CHANGED NAME
                                 "reason": reason,
                                 "document_id": doc.id,
                                 "individual_check": True,
-                                "time_restriction_passed": doc.classification == "TOP_SECRET",
+                                "time_restriction_passed": doc.classification
+                                == "TOP_SECRET",
                             },
                             user_id=user_id,
                             request_id=request_id,
@@ -578,6 +608,7 @@ def get_documents_list():  # CHANGED NAME
                 # No OPA client, allow access
                 filtered_documents.append(doc)
 
+        log_api_to_server1(request_id, success=True)
         # Log the overall access
         cert_fingerprint = None
         if hasattr(g, "client_certificate"):
@@ -609,6 +640,20 @@ def get_documents_list():  # CHANGED NAME
                 "policy_enforced": bool(opa_client),
                 "current_time": current_time.strftime("%H:%M"),
                 "top_secret_time_restriction": "9 PM to 8 AM",
+            },
+            user_id=user_id,
+            request_id=request_id,
+        )
+
+        log_server1_to_user(request_id, allowed=True)
+        log_zta_flow_complete(request_id, success=True)
+        zta_logger.log_event(
+            "ZTA_FLOW_COMPLETE",
+            {
+                "request_id": request_id,
+                "success": True,
+                "documents_returned": len(filtered_documents),
+                "opa_checks": opa_checks_performed,
             },
             user_id=user_id,
             request_id=request_id,
@@ -665,14 +710,84 @@ def get_documents_list():  # CHANGED NAME
         return jsonify({"error": "Failed to fetch documents", "message": str(e)}), 500
 
 
+def evaluate_with_time_restrictions(self, input_data, request_id=None):
+    """
+    Wrapper method for backward compatibility with routes.py
+    Calls the main evaluate_document_access method
+    """
+    try:
+        self.logger.warning(
+            f"⚠️ Using evaluate_with_time_restrictions wrapper - request_id: {request_id}"
+        )
+
+        # Extract user and document from input_data
+        user_claims = {
+            "id": input_data.get("user", {}).get("id"),
+            "username": input_data.get("user", {}).get("username"),
+            "user_class": input_data.get("user", {}).get("role"),
+            "department": input_data.get("user", {}).get("department"),
+            "facility": input_data.get("user", {}).get("facility"),
+            "clearance_level": input_data.get("user", {}).get("clearance"),
+        }
+
+        document_info = {
+            "id": input_data.get("resource", {}).get("id"),
+            "document_id": input_data.get("resource", {}).get(
+                "document_id", f"doc_{input_data.get('resource', {}).get('id')}"
+            ),
+            "classification": input_data.get("resource", {}).get(
+                "classification", "BASIC"
+            ),
+            "department": input_data.get("resource", {}).get("department"),
+            "facility": input_data.get("resource", {}).get("facility"),
+        }
+
+        # Call the main evaluation method
+        result = self.evaluate_document_access(
+            user_claims, document_info, input_data.get("action", "read")
+        )
+
+        # Add time restriction info for compatibility
+        current_hour = datetime.now().hour
+        is_time_restricted = document_info.get("classification") == "TOP_SECRET" and (
+            current_hour >= 21 or current_hour < 8
+        )
+
+        return {
+            "overall_allow": result.get("allowed", False),
+            "reason": result.get("reason", "Policy evaluation complete"),
+            "time_restriction_applied": is_time_restricted,
+            "current_hour": current_hour,
+            "original_result": result,
+        }
+
+    except Exception as e:
+        self.logger.error(f"Error in evaluate_with_time_restrictions: {str(e)}")
+        return {
+            "overall_allow": False,
+            "reason": f"Evaluation error: {str(e)}",
+            "time_restriction_applied": False,
+            "current_hour": datetime.now().hour,
+        }
+
+
 # Get single document - accepts BOTH authentication methods
 @api_bp.route("/documents/<int:document_id>", methods=["GET"])
 @require_authentication
 def get_document(document_id):
     """Get single document - accepts either mTLS or JWT"""
     try:
+        from app.middleware.zta_flow_middleware import (
+            log_zta_flow_start,
+            log_opa_to_api_server,
+            log_api_to_server1,
+            log_server1_to_user,
+            log_zta_flow_complete,
+        )
+
         # Get request ID from g (added by middleware) or generate one
         request_id = getattr(g, "request_id", str(uuid.uuid4()))
+        g.request_id = request_id
 
         claims = get_user_claims()
 
@@ -688,6 +803,12 @@ def get_document(document_id):
                 request_id=request_id,
             )
             return jsonify({"error": "Authentication required"}), 401
+
+        log_zta_flow_start(claims, {"type": "document", "id": document_id}, "read")
+
+        from app.services.service_communicator import get_service_communicator
+
+        communicator = get_service_communicator()
 
         # Find document
         document = GovernmentDocument.query.get_or_404(document_id)
@@ -761,6 +882,8 @@ def get_document(document_id):
                 reason = result.get("reason", "Policy evaluation complete")
                 decision_id = "time_restricted_evaluation"
 
+                log_opa_to_api_server(request_id, result)
+
                 # Log time-based restriction check
                 if document.classification == "TOP_SECRET":
                     current_hour = datetime.now().hour
@@ -798,6 +921,10 @@ def get_document(document_id):
                 )
 
                 if not allowed:
+
+                    log_api_to_server1(request_id, success=False)
+                    log_server1_to_user(request_id, allowed=False)
+                    log_zta_flow_complete(request_id, success=False)
                     # Log denied access with OPA reason
                     cert_fingerprint = None
                     if hasattr(g, "client_certificate"):
@@ -852,14 +979,14 @@ def get_document(document_id):
                                 {
                                     "error": "Access denied due to time restrictions",
                                     "reason": reason,
-                                    "details": f"TOP_SECRET documents cannot be accessed between 9 PM and 8 AM",
+                                    "details": f"TOP_SECRET documents cannot be accessed between 12 AM and 8 AM",
                                     "current_time": datetime.now().strftime("%H:%M"),
                                     "zta_context": {
                                         "auth_method": claims.get("auth_method"),
                                         "policy_violation": True,
                                         "request_id": request_id,
                                         "time_restriction": True,
-                                        "restricted_hours": "21:00 to 08:00",
+                                        "restricted_hours": "00:00 to 08:00",
                                     },
                                 }
                             ),
@@ -894,6 +1021,8 @@ def get_document(document_id):
                     user_id=claims.get("sub"),
                     request_id=request_id,
                 )
+
+        log_api_to_server1(request_id, success=True)
 
         # Log allowed access with original logger
         cert_fingerprint = None
@@ -957,6 +1086,9 @@ def get_document(document_id):
             user_id=claims.get("sub"),
             request_id=request_id,
         )
+
+        log_server1_to_user(request_id, allowed=True)
+        log_zta_flow_complete(request_id, success=True)
 
         return (
             jsonify(
@@ -1690,29 +1822,31 @@ def verify_certificate():
     """Endpoint to verify and log certificate details"""
     try:
         request_id = getattr(g, "request_id", str(uuid.uuid4()))
-        
+
         # Get certificate from g object
         if not hasattr(g, "client_certificate"):
             return jsonify({"error": "No certificate provided"}), 400
-        
+
         cert_info = g.client_certificate
-        
+
         # Extract certificate details for logging
         from app.mTLS.cert_manager import cert_manager
-        
+
         # Get certificate PEM if available
         cert_pem = request.environ.get("SSL_CLIENT_CERT")
         if cert_pem:
             # Use enhanced logging
-            is_valid, detailed_info, validation_checks = cert_manager.validate_certificate_with_detailed_logging(
-                cert_pem, request_id, request.remote_addr
+            is_valid, detailed_info, validation_checks = (
+                cert_manager.validate_certificate_with_detailed_logging(
+                    cert_pem, request_id, request.remote_addr
+                )
             )
         else:
             # Fallback to basic info
             is_valid = True
             detailed_info = cert_info
             validation_checks = {}
-        
+
         # Log certificate verification details
         zta_logger.log_event(
             "CERTIFICATE_VERIFICATION_DETAILED",
@@ -1725,23 +1859,31 @@ def verify_certificate():
             },
             request_id=request_id,
         )
-        
-        return jsonify({
-            "status": "success",
-            "certificate_valid": is_valid,
-            "certificate_details": detailed_info,
-            "validation_checks": validation_checks,
-            "zta_context": {
-                "verification_method": "mTLS_certificate",
-                "request_id": request_id,
-                "timestamp": datetime.utcnow().isoformat(),
-            }
-        }), 200
-        
+
+        return (
+            jsonify(
+                {
+                    "status": "success",
+                    "certificate_valid": is_valid,
+                    "certificate_details": detailed_info,
+                    "validation_checks": validation_checks,
+                    "zta_context": {
+                        "verification_method": "mTLS_certificate",
+                        "request_id": request_id,
+                        "timestamp": datetime.utcnow().isoformat(),
+                    },
+                }
+            ),
+            200,
+        )
+
     except Exception as e:
         zta_logger.log_event(
             "CERTIFICATE_VERIFICATION_ERROR",
             {"error": str(e), "client_ip": request.remote_addr},
             request_id=getattr(g, "request_id", str(uuid.uuid4())),
         )
-        return jsonify({"error": "Certificate verification failed", "message": str(e)}), 500
+        return (
+            jsonify({"error": "Certificate verification failed", "message": str(e)}),
+            500,
+        )

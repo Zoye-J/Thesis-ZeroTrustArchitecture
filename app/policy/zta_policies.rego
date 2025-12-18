@@ -152,3 +152,221 @@ allow_certificate_revoke {
     # Or certificate is compromised
     input.reason == "compromised"
 }
+
+
+#############################################
+# DEPARTMENT-SPECIFIC ACCESS CONTROL
+#############################################
+
+# Department resource mapping
+department_resources := {
+    "Ministry of Defence": {
+        "departments": ["Operations", "Intelligence", "Logistics", "Personnel"],
+        "categories": ["Strategy", "Operations", "Budget", "Personnel", "Intelligence", "Weapons"],
+        "allowed_facilities": ["Ministry of Defence", "National Security Agency"]  # MOD can access some NSA docs
+    },
+    "Ministry of Finance": {
+        "departments": ["Budget", "Taxation", "Treasury", "Audit"],
+        "categories": ["Budget", "Finance", "Tax", "Policy", "Procurement"],
+        "allowed_facilities": ["Ministry of Finance"]
+    },
+    "National Security Agency": {
+        "departments": ["Cyber Security", "Intelligence", "Counter-Terrorism", "Surveillance"],
+        "categories": ["Intelligence", "Security", "Technology", "Cyber", "Surveillance"],
+        "allowed_facilities": ["National Security Agency", "Ministry of Defence"]  # NSA can access some MOD docs
+    }
+}
+
+# Check if user can access resource based on department
+department_access_allowed {
+    # Get user's facility info
+    user_facility := input.user.facility
+    user_department := input.user.department
+    
+    # Get resource info
+    resource_facility := input.resource.facility
+    resource_department := input.resource.department
+    resource_category := input.resource.category
+    
+    # User's facility mapping
+    facility_config := department_resources[user_facility]
+    
+    # Check 1: User can access resources from allowed facilities
+    facility_config.allowed_facilities[_] == resource_facility
+    
+    # Check 2: User can access resources from allowed departments
+    facility_config.departments[_] == resource_department
+    
+    # Check 3: User can access resources from allowed categories (if category specified)
+    resource_category == "" or facility_config.categories[_] == resource_category
+}
+
+#############################################
+# ENHANCED CLEARANCE LEVEL CHECKS
+#############################################
+
+# Clearance level hierarchy
+clearance_hierarchy := ["BASIC", "CONFIDENTIAL", "SECRET", "TOP_SECRET"]
+
+# Check if user has sufficient clearance
+clearance_allowed {
+    # Get indices in hierarchy
+    user_index := {i | clearance_hierarchy[i] == input.user.clearance}
+    resource_index := {i | clearance_hierarchy[i] == input.resource.classification}
+    
+    # User clearance must be >= resource clearance
+    user_index[_] >= resource_index[_]
+}
+
+#############################################
+# TIME-BASED ACCESS RESTRICTIONS
+#############################################
+
+# Business hours: 8 AM to 9 PM (20:59)
+is_business_hour {
+    hour := time.clock(time.now_ns())[0]
+    hour >= 8
+    hour < 21
+}
+
+# TOP_SECRET documents require business hours
+top_secret_time_allowed {
+    input.resource.classification != "TOP_SECRET"
+} else {
+    input.resource.classification == "TOP_SECRET"
+    is_business_hour
+}
+
+#############################################
+# AUTHENTICATION STRENGTH REQUIREMENTS
+#############################################
+
+# Authentication tiers
+auth_tier := tier {
+    # Tier 3: mTLS + JWT
+    input.authentication.method == "mTLS_JWT"
+    tier := 3
+} else := tier {
+    # Tier 2: mTLS Service
+    input.authentication.method == "mTLS_service"
+    tier := 2
+} else := tier {
+    # Tier 1: JWT only
+    input.authentication.method == "JWT"
+    tier := 1
+} else := 0
+
+# Required authentication tier based on classification
+required_auth_tier := tier {
+    input.resource.classification == "TOP_SECRET"
+    tier := 2  # mTLS required
+} else := tier {
+    input.resource.classification == "SECRET"
+    tier := 2  # mTLS required
+} else := tier {
+    input.resource.classification == "CONFIDENTIAL"
+    tier := 1  # JWT acceptable
+} else := 1
+
+# Check authentication strength
+auth_strength_allowed {
+    auth_tier >= required_auth_tier
+}
+
+#############################################
+# MAIN ACCESS DECISION
+#############################################
+
+# Grant access if ALL conditions are met
+allow {
+    # 1. Department access allowed
+    department_access_allowed
+    
+    # 2. Clearance level sufficient
+    clearance_allowed
+    
+    # 3. Time restrictions passed
+    top_secret_time_allowed
+    
+    # 4. Authentication strength sufficient
+    auth_strength_allowed
+    
+    # 5. Action is allowed for user role
+    action_allowed
+}
+
+# Action-specific rules
+action_allowed {
+    input.action == "read"
+} else {
+    input.action == "create"
+    input.user.role in ["admin", "superadmin"]
+} else {
+    input.action == "update"
+    input.user.role in ["admin", "superadmin"]
+    input.resource.owner == input.user.id  # Can only update own documents
+} else {
+    input.action == "delete"
+    input.user.role == "superadmin"
+}
+
+#############################################
+# DECISION WITH DETAILED REASONING
+#############################################
+
+decision := {
+    "allow": allow,
+    "reason": reason,
+    "checks": {
+        "department_access": department_access_allowed,
+        "clearance": clearance_allowed,
+        "time_restrictions": top_secret_time_allowed,
+        "authentication": auth_strength_allowed,
+        "action": action_allowed
+    },
+    "user_context": {
+        "facility": input.user.facility,
+        "department": input.user.department,
+        "clearance": input.user.clearance,
+        "role": input.user.role
+    },
+    "resource_context": {
+        "facility": input.resource.facility,
+        "department": input.resource.department,
+        "classification": input.resource.classification,
+        "category": input.resource.category
+    },
+    "timestamp": time.now_ns(),
+    "request_id": input.request_id
+} {
+    allow
+    reason := "Access granted - all policy checks passed"
+} else = {
+    "allow": false,
+    "reason": reason,
+    "failed_checks": failed_checks,
+    "user_context": {
+        "facility": input.user.facility,
+        "department": input.user.department,
+        "clearance": input.user.clearance,
+        "role": input.user.role
+    },
+    "resource_context": {
+        "facility": input.resource.facility,
+        "department": input.resource.department,
+        "classification": input.resource.classification,
+        "category": input.resource.category
+    },
+    "timestamp": time.now_ns(),
+    "request_id": input.request_id
+} {
+    not allow
+    reason := "Access denied"
+    failed_checks := {
+        "department_access": not department_access_allowed,
+        "clearance": not clearance_allowed,
+        "time_restrictions": not top_secret_time_allowed,
+        "authentication": not auth_strength_allowed,
+        "action": not action_allowed
+    }
+}
