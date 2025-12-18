@@ -1,0 +1,90 @@
+# from app import create_app
+# import os
+# import ssl
+
+# app = create_app()
+
+# if __name__ == "__main__":
+#     cert_path = "./certs"
+#     ssl_context = None
+
+#     print("=" * 60)
+#     print("ZTA Government System - PRODUCTION MODE")
+#     print("=" * 60)
+
+#     if os.path.exists(f"{cert_path}/server.crt") and os.path.exists(f"{cert_path}/server.key"):
+#         print("✓ SSL certificates found")
+
+#         if os.path.exists(f"{cert_path}/ca.crt"):
+#             print("✓ CA certificate found")
+
+#             try:
+#                 # PRODUCTION: Full mTLS with strong ciphers
+#                 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+#                 context.load_cert_chain(f"{cert_path}/server.crt", f"{cert_path}/server.key")
+
+#                 # mTLS: Require client certificates
+#                 context.verify_mode = ssl.CERT_REQUIRED
+#                 context.load_verify_locations(f"{cert_path}/ca.crt")
+
+#                 # Government-grade ciphers
+#                 context.set_ciphers('ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384')
+
+#                 ssl_context = context
+#                 print("✅ mTLS ENABLED - Client certificates REQUIRED")
+#                 print("   Government-grade encryption active")
+
+#             except Exception as e:
+#                 print(f"❌ mTLS setup failed: {e}")
+#                 print("⚠ Falling back to simple SSL")
+#                 ssl_context = (f"{cert_path}/server.crt", f"{cert_path}/server.key")
+#         else:
+#             print("⚠ CA certificate not found, using standard SSL")
+#             ssl_context = (f"{cert_path}/server.crt", f"{cert_path}/server.key")
+#     else:
+#         print("❌ FATAL: SSL certificates not found")
+#         print("Run: python create_certificates.py")
+#         exit(1)
+
+#     print("=" * 60)
+#     print("Server starting on: https://localhost:5000")
+#     print("Client certificates REQUIRED for all connections")
+#     print("=" * 60)
+
+#     app.run(debug=False, port=5000, host="0.0.0.0", ssl_context=ssl_context)
+
+
+#!/usr/bin/env python3
+
+
+#!/usr/bin/env python3
+"""
+ZTA Government System - Main Web Server (HTTP for JWT)
+Simple version without adding routes
+"""
+
+import sys
+import os
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from app import create_app
+
+# Create app - DON'T add routes here
+app = create_app()
+
+if __name__ == "__main__":
+    print("=" * 60)
+    print("🏛️ ZTA GOVERNMENT SYSTEM - WEB SERVER")
+    print("=" * 60)
+    print("\n📡 Server: HTTP (JWT Authentication)")
+    print("🔌 Port: 5000")
+    print("🌐 Access: http://localhost:5000/api/auth/")
+    print("\n🔗 Direct URLs:")
+    print("  • Login: http://localhost:5000/api/auth/login")
+    print("  • Dashboard: http://localhost:5000/api/auth/dashboard")
+    print("  • Register: http://localhost:5000/api/auth/register")
+    print("\n🔐 Test Login: mod_admin / Admin@123")
+    print("=" * 60)
+
+    app.run(debug=True, port=5000, host="0.0.0.0")

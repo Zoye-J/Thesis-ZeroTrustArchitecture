@@ -332,7 +332,7 @@ document.addEventListener('DOMContentLoaded', function() {
             console.log('Sending registration data:', formData);
             
             // Send registration request
-            const response = await fetch('/api/register', {
+            const response = await fetch('/api/register/', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'

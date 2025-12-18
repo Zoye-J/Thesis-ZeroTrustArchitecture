@@ -24,24 +24,22 @@
             Login
         </button>
     </form>
-        <div style="margin-top: 2rem; padding: 1.5rem; background: #f8f9fa; border-radius: 10px;">
-            <h3 style="color: #1a237e; margin-bottom: 1rem; text-align: center;">Government Employee Registration</h3>
-            <p style="text-align: center; margin-bottom: 1rem; color: #666;">
-                Register using your official government email address.
-                Access will be automatically granted based on your department.
-            </p>
-            <div style="text-align: center;">
-                <button onclick="window.location.href='/register'" 
-                        style="background: #1a237e; color: white; border: none; padding: 0.75rem 1.5rem; 
-                            border-radius: 5px; cursor: pointer; font-weight: bold;">
-                    Register Now
-                </button>
-            </div>
-            <p style="text-align: center; margin-top: 1rem; font-size: 0.9rem; color: #666;">
-                Only @mod.gov, @mof.gov, and @nsa.gov emails are allowed.
-            </p>
+    
+    <div style="margin-top: 2rem; padding: 1.5rem; background: #f8f9fa; border-radius: 10px;">
+        <h3 style="color: #1a237e; margin-bottom: 1rem; text-align: center;">Government Employee Registration</h3>
+        <p style="text-align: center; margin-bottom: 1rem; color: #666;">
+            Register using your official government email address.
+        </p>
+        <div style="text-align: center;">
+            <button onclick="window.location.href='/register'" 
+                    style="background: #1a237e; color: white; border: none; padding: 0.75rem 1.5rem; 
+                        border-radius: 5px; cursor: pointer; font-weight: bold;">
+                Register Now
+            </button>
         </div>
-        <div id="message" style="margin-top: 1rem;"></div>
+    </div>
+    
+    <div id="message" style="margin-top: 1rem;"></div>
     
     <div style="margin-top: 2rem; padding: 1rem; background: #f8f9fa; border-radius: 5px; font-size: 0.9rem;">
         <h3 style="color: #2c3e50; margin-bottom: 0.5rem;">Test Users:</h3>
@@ -49,12 +47,12 @@
             <li><strong>Superadmin:</strong> admin / Admin123</li>
             <li><strong>Admin (Finance):</strong> fin_admin / Admin123</li>
             <li><strong>User (Finance):</strong> fin_user / User123</li>
-            <li><strong>User (HR):</strong> hr_user / User123</li>
         </ul>
     </div>
 </div>
 
 <script>
+// SIMPLE LOGIN - NO AUTO CHECKS
 document.getElementById('loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     
@@ -62,10 +60,16 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
     const password = document.getElementById('password').value;
     const messageDiv = document.getElementById('message');
     
-    messageDiv.innerHTML = '<div class="alert alert-info">Logging in...</div>';
+    // Clear previous messages
+    messageDiv.innerHTML = '';
+    
+    // Show loading
+    messageDiv.innerHTML = '<div style="background: #d1ecf1; color: #0c5460; padding: 10px; border-radius: 5px; margin: 10px 0;">Logging in...</div>';
     
     try {
-        const response = await fetch('/login', {
+        console.log('Logging in with:', username);
+        
+        const response = await fetch('/api/auth/login', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -73,26 +77,55 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
             body: JSON.stringify({ username, password })
         });
         
-        const data = await response.json();
+        // First check if it's JSON
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            const text = await response.text();
+            console.error('Server returned HTML:', text.substring(0, 200));
+            throw new Error('Server returned HTML instead of JSON');
+        }
         
-        if (response.ok) {
-            // Store tokens
+        // Parse JSON
+        const data = await response.json();
+        console.log('Login response:', data);
+        
+        if (response.ok && data.access_token) {
+            // Store token
             localStorage.setItem('access_token', data.access_token);
-            localStorage.setItem('refresh_token', data.refresh_token);
             
-            messageDiv.innerHTML = '<div class="alert alert-success">Login successful! Redirecting...</div>';
+            // Show success
+            messageDiv.innerHTML = '<div style="background: #d4edda; color: #155724; padding: 10px; border-radius: 5px; margin: 10px 0;">✅ Login successful! Redirecting...</div>';
             
-            // Redirect to dashboard WITH token in header
+            try {
+                await fetch('/api/auth/login-event', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${data.access_token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        username: username,
+                        timestamp: new Date().toISOString()
+                    })
+                });
+            } catch (logError) {
+                console.warn('Could not log login event:', logError);
+            }
+            // Redirect to dashboard
             setTimeout(() => {
-                // Redirect to dashboard page (not API endpoint)
                 window.location.href = '/dashboard';
             }, 1000);
         } else {
-            messageDiv.innerHTML = `<div class="alert alert-error">Error: ${data.error || 'Login failed'}</div>`;
+            // Show error
+            messageDiv.innerHTML = `<div style="background: #f8d7da; color: #721c24; padding: 10px; border-radius: 5px; margin: 10px 0;">Error: ${data.error || 'Login failed'}</div>`;
         }
+        
     } catch (error) {
-        messageDiv.innerHTML = `<div class="alert alert-error">Network error: ${error.message}</div>`;
+        console.error('Login error:', error);
+        messageDiv.innerHTML = `<div style="background: #f8d7da; color: #721c24; padding: 10px; border-radius: 5px; margin: 10px 0;">Error: ${error.message}</div>`;
     }
 });
+
+console.log('Login page ready');
 </script>
 {% endblock %}

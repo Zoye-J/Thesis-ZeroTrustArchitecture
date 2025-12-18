@@ -164,6 +164,9 @@ class AccessLog(db.Model):
 
     user = db.relationship("User", backref="access_logs")
     document = db.relationship("GovernmentDocument", backref="access_logs")
+    request_id = db.Column(db.String(100), nullable=True)
+    event_type = db.Column(db.String(100), nullable=True)
+    zta_context = db.Column(db.Text, nullable=True)  # Store JSON context
 
 
 class Facility(db.Model):

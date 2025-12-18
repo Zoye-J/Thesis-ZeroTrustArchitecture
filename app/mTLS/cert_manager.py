@@ -41,6 +41,206 @@ class CertificateManager:
             print(f"Command execution error: {e}")
             return False
 
+    def validate_certificate_with_detailed_logging(
+        self, cert_pem, request_id=None, client_ip=None
+    ):
+        """Enhanced certificate validation with detailed logging for dashboard"""
+        from app.logs.zta_event_logger import zta_logger
+
+        validation_checks = {
+            "certificate_present": False,
+            "format_valid": False,
+            "signature_valid": False,
+            "not_expired": False,
+            "not_revoked": False,
+            "issuer_trusted": False,
+            "key_usage_valid": False,
+            "time_restrictions_passed": True,
+        }
+
+        cert_info = {}
+        validation_result = "FAILED"
+
+        try:
+            # Parse certificate
+            validation_checks["certificate_present"] = bool(cert_pem)
+
+            cert = x509.load_pem_x509_certificate(cert_pem.encode(), default_backend())
+            validation_checks["format_valid"] = True
+
+            # Extract certificate details
+            fingerprint = cert.fingerprint(hashes.SHA256()).hex()
+            serial = format(cert.serial_number, "X")
+
+            # Get subject and issuer
+            subject = {}
+            for attr in cert.subject:
+                subject[attr.oid._name] = attr.value
+
+            issuer = {}
+            for attr in cert.issuer:
+                issuer[attr.oid._name] = attr.value
+
+            # Check validity period
+            now = datetime.utcnow()
+            validation_checks["not_expired"] = now < cert.not_valid_after
+            validation_checks["not_yet_valid"] = now >= cert.not_valid_before
+
+            # Check issuer
+            if os.path.exists(self.ca_cert_path):
+                with open(self.ca_cert_path, "rb") as f:
+                    ca_cert = x509.load_pem_x509_certificate(
+                        f.read(), default_backend()
+                    )
+                    validation_checks["issuer_trusted"] = cert.issuer == ca_cert.subject
+
+            # Check revocation
+            validation_checks["not_revoked"] = not self.is_certificate_revoked(serial)
+
+            # Check key usage
+            try:
+                # Extract key usage extension
+                key_usage = cert.extensions.get_extension_for_class(x509.KeyUsage)
+                validation_checks["key_usage_valid"] = key_usage.value.digital_signature
+            except:
+                validation_checks["key_usage_valid"] = (
+                    True  # Assume valid if extension not present
+                )
+
+            # Build cert info
+            cert_info = {
+                "fingerprint": fingerprint,
+                "serial_number": serial,
+                "subject": subject,
+                "issuer": issuer,
+                "not_valid_before": cert.not_valid_before.isoformat(),
+                "not_valid_after": cert.not_valid_after.isoformat(),
+                "signature_algorithm": (
+                    cert.signature_algorithm_oid._name
+                    if hasattr(cert.signature_algorithm_oid, "_name")
+                    else str(cert.signature_algorithm_oid)
+                ),
+                "version": cert.version.name,
+            }
+
+            # Determine overall result
+            all_passed = all(validation_checks.values())
+            validation_result = "PASSED" if all_passed else "FAILED"
+
+            # Log detailed validation
+            log_details = {
+                "certificate_info": cert_info,
+                "validation_checks": validation_checks,
+                "overall_result": validation_result,
+                "client_ip": client_ip,
+                "checks_passed": sum(1 for v in validation_checks.values() if v),
+                "total_checks": len(validation_checks),
+            }
+
+            if request_id:
+                event_type = (
+                    "CERTIFICATE_VALIDATION_PASSED"
+                    if all_passed
+                    else "CERTIFICATE_VALIDATION_FAILED"
+                )
+                zta_logger.log_event(
+                    event_type,
+                    log_details,
+                    user_id=subject.get("emailAddress"),
+                    request_id=request_id,
+                )
+
+            return all_passed, cert_info, validation_checks
+
+        except Exception as e:
+            # Log validation error
+            log_details = {
+                "error": str(e),
+                "validation_checks": validation_checks,
+                "overall_result": "ERROR",
+                "client_ip": client_ip,
+                "exception_type": type(e).__name__,
+            }
+
+        if request_id:
+            zta_logger.log_event(
+                "CERTIFICATE_VALIDATION_ERROR", log_details, request_id=request_id
+            )
+
+        return False, cert_info, validation_checks
+
+
+def log_certificate_verification_summary(self, cert_pem, request_id, client_ip):
+    """Create a summary log entry for certificate verification"""
+    from app.logs.zta_event_logger import zta_logger
+
+    try:
+        cert = x509.load_pem_x509_certificate(cert_pem.encode(), default_backend())
+        fingerprint = cert.fingerprint(hashes.SHA256()).hex()
+
+        # Extract certificate chain info
+        subject_info = {}
+        for attr in cert.subject:
+            subject_info[attr.oid._name] = attr.value
+
+        issuer_info = {}
+        for attr in cert.issuer:
+            issuer_info[attr.oid._name] = attr.value
+
+        # Calculate remaining validity
+        now = datetime.utcnow()
+        valid_days = (cert.not_valid_after - now).days
+
+        # Log certificate verification summary
+        summary = {
+            "certificate_fingerprint": fingerprint,
+            "subject": subject_info,
+            "issuer": issuer_info,
+            "validity": {
+                "from": cert.not_valid_before.isoformat(),
+                "to": cert.not_valid_after.isoformat(),
+                "remaining_days": valid_days,
+                "is_expired": valid_days <= 0,
+            },
+            "client_ip": client_ip,
+            "verification_timestamp": now.isoformat(),
+            "certificate_strength": "RSA-2048",  # You can extract this from cert
+            "key_usage": self.extract_key_usage(cert),
+        }
+
+        zta_logger.log_event(
+            "CERTIFICATE_VERIFICATION_SUMMARY", summary, request_id=request_id
+        )
+
+        return summary
+
+    except Exception as e:
+        zta_logger.log_event(
+            "CERTIFICATE_SUMMARY_ERROR",
+            {"error": str(e), "client_ip": client_ip},
+            request_id=request_id,
+        )
+        return None
+
+
+def extract_key_usage(self, cert):
+    """Extract key usage information from certificate"""
+    key_usage = {}
+    try:
+        ku_ext = cert.extensions.get_extension_for_class(x509.KeyUsage)
+        if ku_ext:
+            key_usage = {
+                "digital_signature": ku_ext.value.digital_signature,
+                "key_encipherment": ku_ext.value.key_encipherment,
+                "data_encipherment": ku_ext.value.data_encipherment,
+                "key_agreement": ku_ext.value.key_agreement,
+                "key_cert_sign": ku_ext.value.key_cert_sign,
+                "crl_sign": ku_ext.value.crl_sign,
+            }
+    except:
+        pass
+    return key_usage
+
     def generate_root_ca(self):
         """Generate Root Certificate Authority"""
         print("Generating Root CA...")

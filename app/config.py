@@ -55,7 +55,7 @@ class TestingConfig(Config):
     MTLS_ENABLED = False
 
 
-config = {
+config_dict = {
     "development": DevelopmentConfig,
     "production": ProductionConfig,
     "testing": TestingConfig,

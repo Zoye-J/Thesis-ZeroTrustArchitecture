@@ -1,12 +1,16 @@
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify, current_app, g
 from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
+from app.mTLS.middleware import require_authentication, require_mtls, require_jwt
 from app import db
 from app.models.user import GovernmentDocument, AccessLog, User
 from app.policy.opa_client import get_opa_client
 from app.logs.request_logger import log_request
-from app.auth.mtls_jwt_auth import zta_auth  # NEW: Import ZTA authenticator
+from app.logs.zta_event_logger import zta_logger, EVENT_TYPES
 from datetime import datetime, timedelta
 import uuid
+import hashlib
+from cryptography import x509
+from cryptography.hazmat.backends import default_backend
 
 api_bp = Blueprint("api", __name__)
 
@@ -17,24 +21,63 @@ def get_user_claims():
     Get user claims from either JWT or mTLS certificate
     Returns: claims dict or None if not authenticated
     """
-    # First check if we have ZTA authentication
-    if hasattr(request, "zta_identity"):
-        zta_identity = request.zta_identity
+    # Check Flask's g object for authentication info from middleware
+    auth_method = getattr(g, "auth_method", None)
 
-        if zta_identity.get("type") == "user" and "user" in zta_identity:
-            user = zta_identity["user"]
-            return {
-                "sub": user.id,
-                "username": user.username,
-                "email": user.email,
-                "user_class": user.user_class,
-                "facility": user.facility,
-                "department": user.department,
-                "clearance_level": user.clearance_level,
-                "auth_method": request.zta_auth_method,
-            }
+    if auth_method == "mtls" and hasattr(g, "client_certificate"):
+        # mTLS authentication
+        cert_info = g.client_certificate
 
-    # Fall back to JWT if present
+        # Try to find user by certificate fingerprint
+        fingerprint = cert_info.get("fingerprint")
+        if fingerprint:
+            user = User.find_by_certificate_fingerprint(fingerprint)
+            if user:
+                return {
+                    "sub": user.id,
+                    "username": user.username,
+                    "email": user.email,
+                    "user_class": user.user_class,
+                    "facility": user.facility,
+                    "department": user.department,
+                    "clearance_level": user.clearance_level,
+                    "auth_method": "mTLS",
+                }
+
+        # If user not found by fingerprint, try by email from certificate
+        email = cert_info.get("subject", {}).get("emailAddress")
+        if email:
+            user = User.query.filter_by(email=email).first()
+            if user:
+                return {
+                    "sub": user.id,
+                    "username": user.username,
+                    "email": user.email,
+                    "user_class": user.user_class,
+                    "facility": user.facility,
+                    "department": user.department,
+                    "clearance_level": user.clearance_level,
+                    "auth_method": "mTLS",
+                }
+
+    elif auth_method == "jwt":
+        # JWT authentication
+        user_id = getattr(g, "jwt_identity", None)
+        if user_id:
+            user = User.query.get(user_id)
+            if user:
+                return {
+                    "sub": user.id,
+                    "username": user.username,
+                    "email": user.email,
+                    "user_class": user.user_class,
+                    "facility": user.facility,
+                    "department": user.department,
+                    "clearance_level": user.clearance_level,
+                    "auth_method": "JWT",
+                }
+
+    # Fall back to old JWT method if g object doesn't have info
     try:
         from flask_jwt_extended import verify_jwt_in_request
 
@@ -59,56 +102,225 @@ def get_user_claims():
     return None
 
 
-# Test ZTA authentication endpoint
+# Simple ZTA test endpoint
+@api_bp.route("/zta-test", methods=["GET"])
+def simple_zta_test():
+    """
+    Simple ZTA test endpoint - no authentication required
+    Just checks if certificate is present
+    """
+    request_id = str(uuid.uuid4())
+
+    # Check for certificate
+    cert_pem = request.environ.get("SSL_CLIENT_CERT")
+
+    if cert_pem:
+        try:
+            cert = x509.load_pem_x509_certificate(cert_pem.encode(), default_backend())
+            fingerprint = cert.fingerprint(hashlib.sha256()).hex()
+
+            # Extract info
+            email = None
+            for attr in cert.subject:
+                if attr.oid._name == "emailAddress":
+                    email = attr.value
+                    break
+                elif attr.oid._name == "commonName" and "@" in attr.value:
+                    email = attr.value
+
+            # Log mTLS certificate detection
+            zta_logger.log_event(
+                EVENT_TYPES["MTLS_CERT_VALIDATED"],
+                {
+                    "certificate_present": True,
+                    "email": email,
+                    "fingerprint_short": fingerprint[:16] + "...",
+                    "test_endpoint": True,
+                },
+                request_id=request_id,
+            )
+
+            return (
+                jsonify(
+                    {
+                        "status": "success",
+                        "message": "mTLS certificate detected",
+                        "certificate": {
+                            "present": True,
+                            "email": email,
+                            "fingerprint_short": fingerprint[:16] + "...",
+                            "subject": {
+                                attr.oid._name: attr.value for attr in cert.subject
+                            },
+                        },
+                        "zta_info": {
+                            "authentication_method": "mTLS",
+                            "layer": "Transport security",
+                        },
+                    }
+                ),
+                200,
+            )
+        except Exception as e:
+            zta_logger.log_event(
+                "CERTIFICATE_ERROR",
+                {"error": str(e), "certificate_present": True},
+                request_id=request_id,
+            )
+            return (
+                jsonify(
+                    {
+                        "status": "error",
+                        "message": f"Certificate error: {str(e)}",
+                        "certificate": {"present": True, "valid": False},
+                    }
+                ),
+                400,
+            )
+
+    # No certificate
+    zta_logger.log_event(
+        EVENT_TYPES["MTLS_CERT_REJECTED"],
+        {"reason": "No client certificate provided", "test_endpoint": True},
+        request_id=request_id,
+    )
+
+    return (
+        jsonify(
+            {
+                "status": "info",
+                "message": "No client certificate provided",
+                "certificate": {"present": False},
+                "hint": "Connect with: curl --cert ./certs/clients/1/client.crt --key ./certs/clients/1/client.key --cacert ./certs/ca.crt https://localhost:8443/api/zta-test",
+            }
+        ),
+        200,
+    )
+
+
+# Test authentication endpoint - accepts BOTH mTLS and JWT
 @api_bp.route("/zta/test", methods=["GET"])
-@zta_auth.require_zta_auth(require_jwt_for_users=True)
+@require_authentication  # Accepts either mTLS or JWT
 def test_zta_auth():
     """Test Zero Trust Authentication (JWT + mTLS)"""
     try:
-        # Get user info from ZTA
-        user = request.zta_identity.get("user")
+        request_id = getattr(g, "request_id", str(uuid.uuid4()))
+        claims = get_user_claims()
 
-        return (
-            jsonify(
+        if not claims:
+            zta_logger.log_event(
+                EVENT_TYPES["ACCESS_DENIED"],
+                {"reason": "Authentication required", "test_endpoint": True},
+                request_id=request_id,
+            )
+            return jsonify({"error": "Authentication required"}), 401
+
+        auth_method = claims.get("auth_method", "unknown")
+        user_id = claims.get("sub")
+
+        if auth_method == "mTLS":
+            # Get certificate info from g object
+            cert_info = getattr(g, "client_certificate", {})
+
+            # Log successful mTLS authentication
+            zta_logger.log_event(
+                EVENT_TYPES["ZTA_FLOW_COMPLETE"],
                 {
-                    "status": "success",
-                    "message": "Zero Trust Authentication successful",
-                    "authentication_layers": {
-                        "layer1_mtls": "✓ Client certificate validated",
-                        "layer2_jwt": "✓ JWT token validated",
-                        "layer3_identity_match": "✓ Certificate matches JWT identity",
-                    },
-                    "user": {
-                        "id": user.id if user else None,
-                        "username": user.username if user else None,
-                        "email": user.email if user else None,
-                        "department": user.department if user else None,
-                    },
-                    "certificate_info": {
-                        "fingerprint": request.zta_identity.get("fingerprint", "")[:16]
-                        + "...",
-                        "subject": request.zta_identity.get("subject", {}),
-                        "type": request.zta_identity.get("type"),
-                    },
-                    "auth_method": request.zta_auth_method,
-                    "timestamp": datetime.utcnow().isoformat(),
-                }
-            ),
-            200,
-        )
+                    "authentication_method": "mTLS",
+                    "layers_validated": ["transport_security"],
+                    "certificate_validated": True,
+                    "test_endpoint": True,
+                },
+                user_id=user_id,
+                request_id=request_id,
+            )
+
+            return (
+                jsonify(
+                    {
+                        "status": "success",
+                        "message": "Zero Trust Authentication successful",
+                        "authentication_layers": {
+                            "layer1_mtls": "✓ Client certificate validated",
+                            "layer2_jwt": "✗ JWT token not required (mTLS only)",
+                        },
+                        "user": {
+                            "id": user_id,
+                            "username": claims.get("username"),
+                            "email": claims.get("email"),
+                            "department": claims.get("department"),
+                        },
+                        "certificate_info": {
+                            "fingerprint": cert_info.get("fingerprint", "")[:16]
+                            + "...",
+                            "subject": cert_info.get("subject", {}),
+                        },
+                        "auth_method": "mTLS",
+                        "timestamp": datetime.utcnow().isoformat(),
+                    }
+                ),
+                200,
+            )
+
+        elif auth_method == "JWT":
+            # Log successful JWT authentication
+            zta_logger.log_event(
+                EVENT_TYPES["ZTA_FLOW_COMPLETE"],
+                {
+                    "authentication_method": "JWT",
+                    "layers_validated": ["token_validation"],
+                    "test_endpoint": True,
+                },
+                user_id=user_id,
+                request_id=request_id,
+            )
+
+            return (
+                jsonify(
+                    {
+                        "status": "success",
+                        "message": "JWT Authentication successful",
+                        "authentication_layers": {
+                            "layer1_mtls": "✗ Client certificate not present",
+                            "layer2_jwt": "✓ JWT token validated",
+                        },
+                        "user": {
+                            "id": user_id,
+                            "username": claims.get("username"),
+                            "email": claims.get("email"),
+                            "department": claims.get("department"),
+                        },
+                        "auth_method": "JWT",
+                        "timestamp": datetime.utcnow().isoformat(),
+                    }
+                ),
+                200,
+            )
 
     except Exception as e:
+        zta_logger.log_event(
+            "ZTA_TEST_ERROR",
+            {"error": str(e), "test_endpoint": True},
+            request_id=getattr(g, "request_id", str(uuid.uuid4())),
+        )
         return jsonify({"error": "ZTA test failed", "message": str(e)}), 500
 
 
-# Dashboard statistics (ZTA enabled)
+# Dashboard statistics - accepts BOTH authentication methods
 @api_bp.route("/documents/stats", methods=["GET"])
-@zta_auth.require_zta_auth(require_jwt_for_users=True)
+@require_authentication
 def get_dashboard_stats():
-    """Get dashboard statistics - requires ZTA authentication"""
+    """Get dashboard statistics - accepts either mTLS or JWT"""
     try:
+        request_id = getattr(g, "request_id", str(uuid.uuid4()))
         claims = get_user_claims()
+
         if not claims:
+            zta_logger.log_event(
+                EVENT_TYPES["ACCESS_DENIED"],
+                {"reason": "Authentication required", "endpoint": "stats"},
+                request_id=request_id,
+            )
             return jsonify({"error": "Authentication required"}), 401
 
         user_id = claims["sub"]
@@ -125,6 +337,18 @@ def get_dashboard_stats():
             AccessLog.user_id == user_id, db.func.date(AccessLog.timestamp) == today
         ).count()
 
+        # Log stats access
+        zta_logger.log_event(
+            EVENT_TYPES["ACCESS_GRANTED"],
+            {
+                "resource_type": "statistics",
+                "auth_method": auth_method,
+                "stats_accessed": True,
+            },
+            user_id=user_id,
+            request_id=request_id,
+        )
+
         return (
             jsonify(
                 {
@@ -140,17 +364,29 @@ def get_dashboard_stats():
         )
 
     except Exception as e:
+        zta_logger.log_event(
+            "STATS_ERROR",
+            {"error": str(e), "endpoint": "stats"},
+            request_id=getattr(g, "request_id", str(uuid.uuid4())),
+        )
         return jsonify({"error": "Failed to fetch stats", "message": str(e)}), 500
 
 
-# Get documents with ZTA + OPA
+# Get documents - accepts BOTH authentication methods
 @api_bp.route("/documents", methods=["GET"])
-@zta_auth.require_zta_auth(require_jwt_for_users=True)
-def get_documents():
-    """Get documents - requires ZTA authentication and OPA policy check"""
+@require_authentication
+def get_documents_list():  # CHANGED NAME
+    """Get documents list - accepts either mTLS or JWT"""
     try:
+        request_id = getattr(g, "request_id", str(uuid.uuid4()))
         claims = get_user_claims()
+
         if not claims:
+            zta_logger.log_event(
+                EVENT_TYPES["ACCESS_DENIED"],
+                {"reason": "Authentication required", "endpoint": "documents_list"},
+                request_id=request_id,
+            )
             return jsonify({"error": "Authentication required"}), 401
 
         user_id = claims["sub"]
@@ -161,6 +397,19 @@ def get_documents():
 
         # Get OPA client
         opa_client = get_opa_client()
+
+        # Log document list access attempt
+        zta_logger.log_event(
+            "DOCUMENT_LIST_ACCESS",
+            {
+                "user_class": user_class,
+                "auth_method": auth_method,
+                "department": user_department,
+                "opa_available": opa_client is not None,
+            },
+            user_id=user_id,
+            request_id=request_id,
+        )
 
         # Build query
         query = GovernmentDocument.query.filter_by(
@@ -197,48 +446,172 @@ def get_documents():
         # Execute query
         documents = query.order_by(GovernmentDocument.created_at.desc()).all()
 
-        # Check OPA policy for each document
+        # Check OPA policy for each document WITH TIME RESTRICTIONS
         filtered_documents = []
+        opa_checks_performed = 0
+        opa_allows = 0
+        opa_denies = 0
+        time_restricted_denials = 0
+
+        current_time = datetime.now()
+        current_hour = current_time.hour
+
         for doc in documents:
             # Prepare OPA input
             opa_input = {
-                "identity": {
-                    "user_id": user_id,
-                    "user_class": user_class,
-                    "facility": user_facility,
+                "user": {
+                    "id": user_id,
+                    "username": claims.get("username", user_id),
+                    "role": user_class,
                     "department": user_department,
-                    "clearance_level": claims.get("clearance_level", "BASIC"),
-                    "auth_method": auth_method,
+                    "facility": user_facility,
+                    "clearance": claims.get("clearance_level", "BASIC"),
                 },
                 "resource": {
-                    "document_id": doc.id,
+                    "type": "document",
+                    "id": doc.id,
                     "classification": doc.classification,
                     "facility": doc.facility,
                     "department": doc.department,
-                    "owner_id": doc.owner_id,
+                    "owner": doc.owner_id,
                 },
                 "action": "read",
-                "timestamp": datetime.utcnow().isoformat(),
+                "environment": {
+                    "time": {
+                        "hour": current_hour,
+                        "minute": current_time.minute,
+                        "weekday": current_time.strftime("%A"),
+                        "weekend": current_time.weekday() >= 5,
+                        "iso": current_time.isoformat(),
+                    },
+                    "ip_address": request.remote_addr if request else None,
+                },
+                "request_id": request_id,
+                "authentication": {
+                    "method": "mTLS_JWT" if auth_method == "mTLS" else "JWT",
+                    "certificate": getattr(g, "client_certificate", None),
+                    "jwt_valid": True,
+                },
             }
 
-            # Check OPA policy
-            allowed, reason = zta_auth.check_opa_policy("zta/main", opa_input)
-            if allowed:
+            # Check OPA policy WITH TIME RESTRICTIONS
+            if opa_client:
+                try:
+                    opa_checks_performed += 1
+
+                    # Log individual document OPA check
+                    zta_logger.log_event(
+                        EVENT_TYPES["OPA_QUERY_SENT"],
+                        {
+                            "document_id": doc.id,
+                            "classification": doc.classification,
+                            "policy_path": "zta/main",
+                            "individual_check": True,
+                            "current_hour": current_hour,
+                        },
+                        user_id=user_id,
+                        request_id=request_id,
+                    )
+
+                    # Use the new time-restricted evaluation
+                    result = opa_client.evaluate_with_time_restrictions(
+                        opa_input, request_id
+                    )
+                    
+                    allowed = result.get("overall_allow", False)
+                    reason = result.get("reason", "Policy evaluation complete")
+
+                    is_time_restricted = "outside business hours" in reason or "9 PM" in reason or "8 AM" in reason
+
+                    if allowed:
+                        opa_allows += 1
+                        filtered_documents.append(doc)
+
+                        zta_logger.log_event(
+                            EVENT_TYPES["OPA_RESPONSE_RECEIVED"],
+                            {
+                                "decision": "allow",
+                                "reason": reason,
+                                "document_id": doc.id,
+                                "individual_check": True,
+                                "time_restriction_passed": doc.classification == "TOP_SECRET",
+                            },
+                            user_id=user_id,
+                            request_id=request_id,
+                        )
+                    else:
+                        opa_denies += 1
+                        if is_time_restricted:
+                            time_restricted_denials += 1
+
+                        zta_logger.log_event(
+                            EVENT_TYPES["OPA_RESPONSE_RECEIVED"],
+                            {
+                                "decision": "deny",
+                                "reason": reason,
+                                "document_id": doc.id,
+                                "individual_check": True,
+                                "time_restricted": is_time_restricted,
+                            },
+                            user_id=user_id,
+                            request_id=request_id,
+                        )
+
+                except Exception as e:
+                    # If OPA fails, allow access (fail-open for development)
+                    current_app.logger.warning(
+                        f"OPA check failed for doc {doc.id}: {e}"
+                    )
+                    filtered_documents.append(doc)
+
+                    zta_logger.log_event(
+                        "OPA_CHECK_FAILED",
+                        {
+                            "document_id": doc.id,
+                            "error": str(e),
+                            "fallback": "allow (fail-open)",
+                        },
+                        user_id=user_id,
+                        request_id=request_id,
+                    )
+            else:
+                # No OPA client, allow access
                 filtered_documents.append(doc)
 
-        # Log the access with ZTA info
+        # Log the overall access
+        cert_fingerprint = None
+        if hasattr(g, "client_certificate"):
+            cert_fingerprint = g.client_certificate.get("fingerprint", "")[:16] + "..."
+
         log_request(
             user_id=user_id,
             endpoint="/api/documents",
             method="GET",
             status="allowed",
-            reason=f"ZTA access via {auth_method}",
+            reason=f"Access via {auth_method}",
             auth_method=auth_method,
-            certificate_fingerprint=(
-                request.zta_identity.get("fingerprint", "")[:16] + "..."
-                if hasattr(request, "zta_identity")
-                else None
-            ),
+            certificate_fingerprint=cert_fingerprint,
+            time_restricted_documents_filtered=time_restricted_denials,
+        )
+
+        # Log summary of document access
+        zta_logger.log_event(
+            EVENT_TYPES["ACCESS_GRANTED"],
+            {
+                "resource_type": "document_list",
+                "total_documents": len(documents),
+                "accessible_documents": len(filtered_documents),
+                "opa_checks_performed": opa_checks_performed,
+                "opa_allows": opa_allows,
+                "opa_denies": opa_denies,
+                "time_restricted_denials": time_restricted_denials,
+                "auth_method": auth_method,
+                "policy_enforced": bool(opa_client),
+                "current_time": current_time.strftime("%H:%M"),
+                "top_secret_time_restriction": "9 PM to 8 AM",
+            },
+            user_id=user_id,
+            request_id=request_id,
         )
 
         return (
@@ -261,8 +634,22 @@ def get_documents():
                     ],
                     "zta_info": {
                         "auth_method": auth_method,
-                        "policy_enforced": True,
+                        "policy_enforced": bool(opa_client),
                         "documents_filtered": len(documents) - len(filtered_documents),
+                        "time_restricted_filtered": time_restricted_denials,
+                        "opa_statistics": (
+                            {
+                                "checks_performed": opa_checks_performed,
+                                "allowed": opa_allows,
+                                "denied": opa_denies,
+                                "time_restricted_denials": time_restricted_denials,
+                            }
+                            if opa_client
+                            else None
+                        ),
+                        "request_id": request_id,
+                        "current_time": current_time.isoformat(),
+                        "top_secret_access_hours": "08:00 to 21:00",
                     },
                 }
             ),
@@ -270,17 +657,36 @@ def get_documents():
         )
 
     except Exception as e:
+        zta_logger.log_event(
+            "DOCUMENT_LIST_ERROR",
+            {"error": str(e), "endpoint": "documents_list"},
+            request_id=getattr(g, "request_id", str(uuid.uuid4())),
+        )
         return jsonify({"error": "Failed to fetch documents", "message": str(e)}), 500
 
 
-# Get single document with ZTA + OPA
+# Get single document - accepts BOTH authentication methods
 @api_bp.route("/documents/<int:document_id>", methods=["GET"])
-@zta_auth.require_zta_auth(require_jwt_for_users=True)
+@require_authentication
 def get_document(document_id):
-    """Get single document - requires ZTA authentication"""
+    """Get single document - accepts either mTLS or JWT"""
     try:
+        # Get request ID from g (added by middleware) or generate one
+        request_id = getattr(g, "request_id", str(uuid.uuid4()))
+
         claims = get_user_claims()
+
         if not claims:
+            # Log failed authentication attempt
+            zta_logger.log_event(
+                EVENT_TYPES["ACCESS_DENIED"],
+                {
+                    "resource_id": document_id,
+                    "reason": "No valid authentication",
+                    "auth_method": "none",
+                },
+                request_id=request_id,
+            )
             return jsonify({"error": "Authentication required"}), 401
 
         # Find document
@@ -289,78 +695,267 @@ def get_document(document_id):
         # Get OPA client
         opa_client = get_opa_client()
 
-        # Prepare OPA input with ZTA context
+        # Prepare OPA input with request ID
         opa_input = {
-            "identity": {
-                "user_id": claims["sub"],
-                "user_class": claims["user_class"],
-                "facility": claims.get("facility"),
+            "user": {
+                "id": claims["sub"],
+                "username": claims.get("username", claims["sub"]),
+                "role": claims["user_class"],
                 "department": claims.get("department"),
-                "clearance_level": claims.get("clearance_level", "BASIC"),
-                "auth_method": claims.get("auth_method", "unknown"),
-                "certificate_fingerprint": (
-                    request.zta_identity.get("fingerprint")
-                    if hasattr(request, "zta_identity")
-                    else None
-                ),
+                "facility": claims.get("facility"),
+                "clearance": claims.get("clearance_level", "BASIC"),
             },
             "resource": {
-                "document_id": document.id,
+                "type": "document",
+                "id": document.id,
                 "classification": document.classification,
                 "facility": document.facility,
                 "department": document.department,
-                "owner_id": document.owner_id,
+                "owner": document.owner_id,
             },
             "action": "read",
-            "timestamp": datetime.utcnow().isoformat(),
+            "environment": {
+                "time": {
+                    "hour": datetime.now().hour,
+                    "day_of_week": datetime.now().strftime("%A"),
+                    "weekend": datetime.now().weekday() >= 5,
+                },
+                "ip_address": request.remote_addr if request else None,
+            },
+            "request_id": request_id,
+            "authentication": {
+                "method": "mTLS_JWT" if claims.get("auth_method") == "mTLS" else "JWT",
+                "certificate": getattr(g, "client_certificate", None),
+                "jwt_valid": True,
+            },
         }
 
-        # Check OPA policy
-        allowed, reason = zta_auth.check_opa_policy("zta/main", opa_input)
+        # Log OPA query being sent
+        zta_logger.log_event(
+            EVENT_TYPES["OPA_QUERY_SENT"],
+            {
+                "policy_path": "zta/main",
+                "input_summary": {
+                    "user": claims.get("username"),
+                    "resource_id": document.id,
+                    "classification": document.classification,
+                    "action": "read",
+                    "auth_method": claims.get("auth_method"),
+                    "user_clearance": claims.get("clearance_level"),
+                    "document_clearance": document.classification,
+                },
+            },
+            user_id=claims.get("sub"),
+            request_id=request_id,
+        )
 
-        if not allowed:
-            log_request(
-                user_id=claims.get("sub"),
-                endpoint=f"/api/documents/{document_id}",
-                method="GET",
-                status="denied",
-                reason=f"OPA denied access: {reason}",
-                document_id=document_id,
-                auth_method=claims.get("auth_method", "unknown"),
-                certificate_fingerprint=(
-                    request.zta_identity.get("fingerprint", "")[:16] + "..."
-                    if hasattr(request, "zta_identity")
-                    else None
-                ),
-            )
-            return (
-                jsonify(
-                    {
-                        "error": "Access denied",
-                        "reason": reason,
-                        "zta_context": {
-                            "auth_method": claims.get("auth_method"),
-                            "policy_violation": True,
+        # Check OPA policy WITH TIME RESTRICTIONS
+        if opa_client:
+            try:
+                # Use the new time-restricted evaluation method
+                result = opa_client.evaluate_with_time_restrictions(
+                    opa_input, request_id
+                )
+
+                allowed = result.get("overall_allow", False)
+                reason = result.get("reason", "Policy evaluation complete")
+                decision_id = "time_restricted_evaluation"
+
+                # Log time-based restriction check
+                if document.classification == "TOP_SECRET":
+                    current_hour = datetime.now().hour
+                    time_restricted = current_hour >= 21 or current_hour < 8
+                    zta_logger.log_event(
+                        "TIME_RESTRICTION_CHECK",
+                        {
+                            "document_classification": "TOP_SECRET",
+                            "current_hour": current_hour,
+                            "restricted_hours": "9 PM to 8 AM",
+                            "is_restricted_time": time_restricted,
+                            "access_allowed": not time_restricted,
                         },
-                    }
-                ),
-                403,
-            )
+                        user_id=claims.get("sub"),
+                        request_id=request_id,
+                    )
 
-        # Log access
+                # Log OPA response
+                zta_logger.log_event(
+                    EVENT_TYPES["OPA_RESPONSE_RECEIVED"],
+                    {
+                        "decision": allowed,
+                        "reason": reason,
+                        "decision_id": decision_id,
+                        "clearance_match": claims.get("clearance_level")
+                        == document.classification,
+                        "department_match": claims.get("department")
+                        == document.department,
+                        "time_restrictions_applied": document.classification
+                        == "TOP_SECRET",
+                        "time_based_result": result.get("time_based_restrictions", {}),
+                    },
+                    user_id=claims.get("sub"),
+                    request_id=request_id,
+                )
+
+                if not allowed:
+                    # Log denied access with OPA reason
+                    cert_fingerprint = None
+                    if hasattr(g, "client_certificate"):
+                        cert_fingerprint = (
+                            g.client_certificate.get("fingerprint", "")[:16] + "..."
+                        )
+
+                    # Check if denial is due to time restriction
+                    is_time_restriction = (
+                        "outside business hours" in reason
+                        or "9 PM" in reason
+                        or "8 AM" in reason
+                    )
+
+                    # Log using original logger
+                    log_request(
+                        user_id=claims.get("sub"),
+                        endpoint=f"/api/documents/{document_id}",
+                        method="GET",
+                        status="denied",
+                        reason=f"OPA denied access: {reason}",
+                        document_id=document_id,
+                        auth_method=claims.get("auth_method", "unknown"),
+                        certificate_fingerprint=cert_fingerprint,
+                        request_id=request_id,
+                        time_restriction_applied=is_time_restriction,
+                    )
+
+                    # Also log using ZTA event logger
+                    zta_logger.log_event(
+                        EVENT_TYPES["ACCESS_DENIED"],
+                        {
+                            "resource_id": document_id,
+                            "resource_type": "document",
+                            "classification": document.classification,
+                            "opa_decision": "deny",
+                            "opa_reason": reason,
+                            "auth_method": claims.get("auth_method"),
+                            "clearance": claims.get("clearance_level"),
+                            "zta_violation": True,
+                            "time_restriction": is_time_restriction,
+                            "current_time": datetime.now().isoformat(),
+                        },
+                        user_id=claims.get("sub"),
+                        request_id=request_id,
+                    )
+
+                    # Special response for time-based restrictions
+                    if is_time_restriction:
+                        return (
+                            jsonify(
+                                {
+                                    "error": "Access denied due to time restrictions",
+                                    "reason": reason,
+                                    "details": f"TOP_SECRET documents cannot be accessed between 9 PM and 8 AM",
+                                    "current_time": datetime.now().strftime("%H:%M"),
+                                    "zta_context": {
+                                        "auth_method": claims.get("auth_method"),
+                                        "policy_violation": True,
+                                        "request_id": request_id,
+                                        "time_restriction": True,
+                                        "restricted_hours": "21:00 to 08:00",
+                                    },
+                                }
+                            ),
+                            403,
+                        )
+                    else:
+                        return (
+                            jsonify(
+                                {
+                                    "error": "Access denied",
+                                    "reason": reason,
+                                    "zta_context": {
+                                        "auth_method": claims.get("auth_method"),
+                                        "policy_violation": True,
+                                        "request_id": request_id,
+                                        "user_clearance": claims.get("clearance_level"),
+                                        "required_clearance": document.classification,
+                                    },
+                                }
+                            ),
+                            403,
+                        )
+
+            except Exception as opa_error:
+                # OPA error - log but allow access (fail-open)
+                current_app.logger.warning(f"OPA check failed: {opa_error}")
+
+                # Log OPA failure event
+                zta_logger.log_event(
+                    "OPA_ERROR",
+                    {"error": str(opa_error), "fallback": "fail-open (access allowed)"},
+                    user_id=claims.get("sub"),
+                    request_id=request_id,
+                )
+
+        # Log allowed access with original logger
+        cert_fingerprint = None
+        if hasattr(g, "client_certificate"):
+            cert_fingerprint = g.client_certificate.get("fingerprint", "")[:16] + "..."
+
         log_request(
             user_id=claims.get("sub"),
             endpoint=f"/api/documents/{document_id}",
             method="GET",
             status="allowed",
-            reason=f"ZTA access allowed: {reason}",
+            reason="Access allowed",
             document_id=document_id,
             auth_method=claims.get("auth_method", "unknown"),
-            certificate_fingerprint=(
-                request.zta_identity.get("fingerprint", "")[:16] + "..."
-                if hasattr(request, "zta_identity")
-                else None
-            ),
+            certificate_fingerprint=cert_fingerprint,
+            request_id=request_id,
+        )
+
+        # Log ZTA access granted event
+        zta_logger.log_event(
+            EVENT_TYPES["ACCESS_GRANTED"],
+            {
+                "resource_id": document_id,
+                "resource_type": "document",
+                "classification": document.classification,
+                "opa_decision": "allow" if opa_client else "no_check",
+                "auth_method": claims.get("auth_method"),
+                "clearance": claims.get("clearance_level"),
+                "department_match": claims.get("department") == document.department,
+                "zta_compliant": True,
+                "time_restriction_passed": document.classification == "TOP_SECRET",
+                "current_time": datetime.now().strftime("%H:%M"),
+            },
+            user_id=claims.get("sub"),
+            request_id=request_id,
+        )
+
+        # Log complete ZTA flow
+        zta_logger.log_event(
+            EVENT_TYPES["ZTA_FLOW_COMPLETE"],
+            {
+                "steps_completed": [
+                    "authentication_verified",
+                    "opa_policy_check" if opa_client else "no_policy_check",
+                    (
+                        "time_restriction_check"
+                        if document.classification == "TOP_SECRET"
+                        else "no_time_check"
+                    ),
+                    "access_decision_made",
+                ],
+                "outcome": "access_granted",
+                "zta_principles_applied": [
+                    "verify_explicitly",
+                    "least_privilege",
+                    "assume_breach",
+                    "time_based_access_control",
+                ],
+                "request_id": request_id,
+            },
+            user_id=claims.get("sub"),
+            request_id=request_id,
         )
 
         return (
@@ -379,13 +974,14 @@ def get_document(document_id):
                     },
                     "zta_context": {
                         "auth_method": claims.get("auth_method"),
-                        "policy_decision": "allowed",
-                        "policy_reason": reason,
-                        "authentication_layers": (
-                            ["mTLS", "JWT", "OPA"]
-                            if hasattr(request, "zta_identity")
-                            else ["JWT", "OPA"]
-                        ),
+                        "policy_decision": "allowed" if opa_client else "no_policy",
+                        "request_id": request_id,
+                        "zta_flow_completed": True,
+                        "user_clearance": claims.get("clearance_level"),
+                        "document_clearance": document.classification,
+                        "time_based_control_applied": document.classification
+                        == "TOP_SECRET",
+                        "access_time": datetime.now().isoformat(),
                     },
                 }
             ),
@@ -393,17 +989,33 @@ def get_document(document_id):
         )
 
     except Exception as e:
+        zta_logger.log_event(
+            "DOCUMENT_ACCESS_ERROR",
+            {
+                "error": str(e),
+                "document_id": document_id,
+                "endpoint": "single_document",
+            },
+            request_id=getattr(g, "request_id", str(uuid.uuid4())),
+        )
         return jsonify({"error": "Failed to fetch document", "message": str(e)}), 500
 
 
-# Create document with ZTA
+# Create document - accepts BOTH authentication methods
 @api_bp.route("/documents", methods=["POST"])
-@zta_auth.require_zta_auth(require_jwt_for_users=True)
+@require_authentication
 def create_document():
-    """Create document - requires ZTA authentication"""
+    """Create document - accepts either mTLS or JWT"""
     try:
+        request_id = getattr(g, "request_id", str(uuid.uuid4()))
         claims = get_user_claims()
+
         if not claims:
+            zta_logger.log_event(
+                EVENT_TYPES["ACCESS_DENIED"],
+                {"reason": "Authentication required", "action": "create_document"},
+                request_id=request_id,
+            )
             return jsonify({"error": "Authentication required"}), 401
 
         user_id = claims["sub"]
@@ -413,10 +1025,28 @@ def create_document():
 
         data = request.get_json()
 
+        # Log document creation attempt
+        zta_logger.log_event(
+            "DOCUMENT_CREATE_ATTEMPT",
+            {
+                "user_id": user_id,
+                "auth_method": auth_method,
+                "has_data": data is not None,
+            },
+            user_id=user_id,
+            request_id=request_id,
+        )
+
         # Validate required fields
         required_fields = ["title", "classification", "category"]
         for field in required_fields:
             if field not in data:
+                zta_logger.log_event(
+                    "DOCUMENT_CREATE_ERROR",
+                    {"error": f"Missing field: {field}", "action": "create_document"},
+                    user_id=user_id,
+                    request_id=request_id,
+                )
                 return jsonify({"error": f"{field} is required"}), 400
 
         # Check if user has sufficient clearance
@@ -436,6 +1066,18 @@ def create_document():
         )
 
         if doc_idx > user_idx:
+            zta_logger.log_event(
+                EVENT_TYPES["ACCESS_DENIED"],
+                {
+                    "reason": "Insufficient clearance",
+                    "user_clearance": user_clearance,
+                    "required_clearance": doc_classification,
+                    "clearance_violation": True,
+                    "action": "create_document",
+                },
+                user_id=user_id,
+                request_id=request_id,
+            )
             return (
                 jsonify(
                     {
@@ -471,7 +1113,11 @@ def create_document():
         db.session.add(new_document)
         db.session.commit()
 
-        # Log creation with ZTA info
+        # Log creation with original logger
+        cert_fingerprint = None
+        if hasattr(g, "client_certificate"):
+            cert_fingerprint = g.client_certificate.get("fingerprint", "")[:16] + "..."
+
         log_request(
             user_id=user_id,
             endpoint="/api/documents",
@@ -480,11 +1126,22 @@ def create_document():
             reason=f"Created document {document_id} via {auth_method}",
             document_id=new_document.id,
             auth_method=auth_method,
-            certificate_fingerprint=(
-                request.zta_identity.get("fingerprint", "")[:16] + "..."
-                if hasattr(request, "zta_identity")
-                else None
-            ),
+            certificate_fingerprint=cert_fingerprint,
+        )
+
+        # Log ZTA document creation event
+        zta_logger.log_event(
+            EVENT_TYPES["ACCESS_GRANTED"],
+            {
+                "action": "create_document",
+                "document_id": new_document.id,
+                "classification": new_document.classification,
+                "auth_method": auth_method,
+                "clearance_validated": True,
+                "zta_compliant": True,
+            },
+            user_id=user_id,
+            request_id=request_id,
         )
 
         return (
@@ -500,6 +1157,8 @@ def create_document():
                     "zta_context": {
                         "auth_method": auth_method,
                         "created_via": "Zero Trust Authentication",
+                        "request_id": request_id,
+                        "clearance_validated": True,
                     },
                 }
             ),
@@ -508,17 +1167,29 @@ def create_document():
 
     except Exception as e:
         db.session.rollback()
+        zta_logger.log_event(
+            "DOCUMENT_CREATE_ERROR",
+            {"error": str(e), "action": "create_document"},
+            request_id=getattr(g, "request_id", str(uuid.uuid4())),
+        )
         return jsonify({"error": "Failed to create document", "message": str(e)}), 500
 
 
-# Get access logs (ZTA enabled)
+# Get access logs - STRICT mTLS only (admin endpoint)
 @api_bp.route("/logs", methods=["GET"])
-@zta_auth.require_zta_auth(require_jwt_for_users=True)
+@require_mtls  # Strict: Only mTLS certificates allowed for admin logs
 def get_logs():
-    """Get access logs - requires ZTA authentication"""
+    """Get access logs - requires mTLS certificate (admin only)"""
     try:
+        request_id = getattr(g, "request_id", str(uuid.uuid4()))
         claims = get_user_claims()
+
         if not claims:
+            zta_logger.log_event(
+                EVENT_TYPES["ACCESS_DENIED"],
+                {"reason": "Authentication required", "endpoint": "logs"},
+                request_id=request_id,
+            )
             return jsonify({"error": "Authentication required"}), 401
 
         user_id = claims["sub"]
@@ -526,8 +1197,32 @@ def get_logs():
         user_facility = claims.get("facility")
         auth_method = claims.get("auth_method", "unknown")
 
+        # Log log access attempt
+        zta_logger.log_event(
+            "LOG_ACCESS_ATTEMPT",
+            {
+                "user_class": user_class,
+                "auth_method": auth_method,
+                "endpoint": "logs",
+                "mTLS_required": True,
+            },
+            user_id=user_id,
+            request_id=request_id,
+        )
+
         # Only admin and superadmin can access logs
         if user_class not in ["admin", "superadmin"]:
+            zta_logger.log_event(
+                EVENT_TYPES["ACCESS_DENIED"],
+                {
+                    "reason": "Insufficient privileges",
+                    "required_role": "admin",
+                    "user_role": user_class,
+                    "endpoint": "logs",
+                },
+                user_id=user_id,
+                request_id=request_id,
+            )
             return (
                 jsonify(
                     {
@@ -562,6 +1257,20 @@ def get_logs():
         # Order by most recent and limit
         logs = query.order_by(AccessLog.timestamp.desc()).limit(limit).all()
 
+        # Log successful log access
+        zta_logger.log_event(
+            EVENT_TYPES["ACCESS_GRANTED"],
+            {
+                "endpoint": "logs",
+                "log_count": len(logs),
+                "auth_method": auth_method,
+                "user_role": user_class,
+                "mTLS_validated": True,
+            },
+            user_id=user_id,
+            request_id=request_id,
+        )
+
         return (
             jsonify(
                 {
@@ -583,8 +1292,6 @@ def get_logs():
                             "certificate_fingerprint": getattr(
                                 log, "certificate_fingerprint", None
                             ),
-                            "policy_evaluated": log.policy_evaluated,
-                            "decision_id": log.decision_id,
                         }
                         for log in logs
                     ],
@@ -592,6 +1299,8 @@ def get_logs():
                     "zta_context": {
                         "auth_method": auth_method,
                         "facility": user_facility,
+                        "access_restriction": "mTLS certificate required",
+                        "request_id": request_id,
                     },
                 }
             ),
@@ -599,24 +1308,60 @@ def get_logs():
         )
 
     except Exception as e:
+        zta_logger.log_event(
+            "LOG_ACCESS_ERROR",
+            {"error": str(e), "endpoint": "logs"},
+            request_id=getattr(g, "request_id", str(uuid.uuid4())),
+        )
         return jsonify({"error": "Failed to fetch logs", "message": str(e)}), 500
 
 
-# Get users with ZTA (admin only)
+# Get users - STRICT mTLS only (admin endpoint)
 @api_bp.route("/users", methods=["GET"])
-@zta_auth.require_zta_auth(require_jwt_for_users=True)
+@require_mtls  # Strict: Only mTLS certificates allowed for admin users
 def get_users():
-    """Get users - requires ZTA authentication"""
+    """Get users - requires mTLS certificate (admin only)"""
     try:
+        request_id = getattr(g, "request_id", str(uuid.uuid4()))
         claims = get_user_claims()
+
         if not claims:
+            zta_logger.log_event(
+                EVENT_TYPES["ACCESS_DENIED"],
+                {"reason": "Authentication required", "endpoint": "users"},
+                request_id=request_id,
+            )
             return jsonify({"error": "Authentication required"}), 401
 
         user_class = claims["user_class"]
         auth_method = claims.get("auth_method", "unknown")
 
+        # Log user list access attempt
+        zta_logger.log_event(
+            "USER_LIST_ACCESS_ATTEMPT",
+            {
+                "user_class": user_class,
+                "auth_method": auth_method,
+                "endpoint": "users",
+                "mTLS_required": True,
+            },
+            user_id=claims.get("sub"),
+            request_id=request_id,
+        )
+
         # Only admin and superadmin can access user list
         if user_class not in ["admin", "superadmin"]:
+            zta_logger.log_event(
+                EVENT_TYPES["ACCESS_DENIED"],
+                {
+                    "reason": "Insufficient privileges",
+                    "required_role": "admin",
+                    "user_role": user_class,
+                    "endpoint": "users",
+                },
+                user_id=claims.get("sub"),
+                request_id=request_id,
+            )
             return (
                 jsonify(
                     {
@@ -649,6 +1394,24 @@ def get_users():
         # Include certificate info in response
         users = query.order_by(User.created_at.desc()).all()
 
+        # Count users with certificates
+        users_with_certs = sum(1 for user in users if user.certificate_fingerprint)
+
+        # Log successful user list access
+        zta_logger.log_event(
+            EVENT_TYPES["ACCESS_GRANTED"],
+            {
+                "endpoint": "users",
+                "user_count": len(users),
+                "users_with_certificates": users_with_certs,
+                "auth_method": auth_method,
+                "user_role": user_class,
+                "mTLS_validated": True,
+            },
+            user_id=claims.get("sub"),
+            request_id=request_id,
+        )
+
         return (
             jsonify(
                 {
@@ -677,9 +1440,10 @@ def get_users():
                     "zta_context": {
                         "auth_method": auth_method,
                         "facility": user_facility,
-                        "certificate_based_auth_enabled": any(
-                            user.certificate_fingerprint for user in users
-                        ),
+                        "certificate_based_auth_enabled": users_with_certs > 0,
+                        "certificate_users_count": users_with_certs,
+                        "access_restriction": "mTLS certificate required",
+                        "request_id": request_id,
                     },
                 }
             ),
@@ -687,92 +1451,297 @@ def get_users():
         )
 
     except Exception as e:
+        zta_logger.log_event(
+            "USER_LIST_ERROR",
+            {"error": str(e), "endpoint": "users"},
+            request_id=getattr(g, "request_id", str(uuid.uuid4())),
+        )
         return jsonify({"error": "Failed to fetch users", "message": str(e)}), 500
 
 
-# Test OPA endpoint with ZTA
+# Test OPA endpoint - accepts BOTH authentication methods
 @api_bp.route("/opa-test", methods=["GET"])
-@zta_auth.require_zta_auth(require_jwt_for_users=False)  # Allow mTLS only for services
+@require_authentication
 def opa_test():
-    """Test OPA integration with ZTA"""
+    """Test OPA integration - accepts either mTLS or JWT"""
     try:
+        request_id = getattr(g, "request_id", str(uuid.uuid4()))
         opa_client = get_opa_client()
 
-        # Add ZTA context to response
-        zta_context = {}
-        if hasattr(request, "zta_identity"):
-            zta_context = {
-                "auth_method": request.zta_auth_method,
-                "identity_type": request.zta_identity.get("type"),
-                "identity": request.zta_identity.get("service_name")
-                or request.zta_identity.get("email"),
-            }
+        claims = get_user_claims()
+        auth_method = claims.get("auth_method", "unknown") if claims else "unknown"
+
+        # Log OPA test attempt
+        zta_logger.log_event(
+            "OPA_TEST_ATTEMPT",
+            {
+                "auth_method": auth_method,
+                "opa_client_available": opa_client is not None,
+            },
+            user_id=claims.get("sub") if claims else None,
+            request_id=request_id,
+        )
 
         # Test OPA connection
-        if opa_client.health_check():
+        if opa_client and opa_client.health_check():
+            zta_logger.log_event(
+                EVENT_TYPES["OPA_RESPONSE_RECEIVED"],
+                {
+                    "status": "connected",
+                    "opa_url": opa_client.opa_url,
+                    "health_check": "passed",
+                },
+                user_id=claims.get("sub") if claims else None,
+                request_id=request_id,
+            )
+
             return (
                 jsonify(
                     {
                         "message": "OPA integration working",
-                        "opa_url": opa_client.opa_url,
+                        "opa_url": (
+                            opa_client.opa_url if opa_client else "Not configured"
+                        ),
                         "status": "connected",
-                        "zta_context": zta_context,
+                        "zta_context": {
+                            "auth_method": auth_method,
+                            "request_id": request_id,
+                        },
                         "timestamp": datetime.utcnow().isoformat(),
                     }
                 ),
                 200,
             )
         else:
+            zta_logger.log_event(
+                "OPA_HEALTH_CHECK_FAILED",
+                {
+                    "status": "disconnected",
+                    "opa_url": opa_client.opa_url if opa_client else "Not configured",
+                    "health_check": "failed",
+                },
+                user_id=claims.get("sub") if claims else None,
+                request_id=request_id,
+            )
+
             return (
                 jsonify(
                     {
                         "message": "OPA server not reachable",
-                        "opa_url": opa_client.opa_url,
+                        "opa_url": (
+                            opa_client.opa_url if opa_client else "Not configured"
+                        ),
                         "status": "disconnected",
-                        "zta_context": zta_context,
+                        "zta_context": {
+                            "auth_method": auth_method,
+                            "request_id": request_id,
+                        },
                     }
                 ),
                 503,
             )
 
     except Exception as e:
+        zta_logger.log_event(
+            "OPA_TEST_ERROR",
+            {"error": str(e), "endpoint": "opa-test"},
+            request_id=getattr(g, "request_id", str(uuid.uuid4())),
+        )
         return jsonify({"error": "OPA test failed", "message": str(e)}), 500
 
 
-# Service health endpoint (mTLS only - for service-to-service)
+# Service health endpoint - STRICT mTLS only (for services)
 @api_bp.route("/service/health", methods=["GET"])
-@zta_auth.require_zta_auth(require_jwt_for_users=False)  # Services only need mTLS
+@require_mtls  # Services only need mTLS
 def service_health():
     """Service health check - mTLS only (service-to-service)"""
+    request_id = str(uuid.uuid4())
+    claims = get_user_claims()
+    auth_method = claims.get("auth_method", "unknown") if claims else "unknown"
+
+    # Log service health check
+    zta_logger.log_event(
+        "SERVICE_HEALTH_CHECK",
+        {
+            "status": "healthy",
+            "auth_method": auth_method,
+            "service_type": "mTLS_only",
+            "request_source": "service",
+        },
+        user_id=claims.get("sub") if claims else None,
+        request_id=request_id,
+    )
+
     return jsonify(
         {
             "status": "healthy",
             "service": "ZTA Government System",
-            "auth_method": (
-                request.zta_auth_method
-                if hasattr(request, "zta_auth_method")
-                else "unknown"
-            ),
-            "identity": (
-                request.zta_identity.get("service_name", "unknown")
-                if hasattr(request, "zta_identity")
-                else "unknown"
-            ),
+            "auth_method": auth_method,
             "timestamp": datetime.utcnow().isoformat(),
             "zta_enabled": True,
             "features": ["JWT", "mTLS", "OPA", "Certificate Validation", "RBAC"],
+            "access_restriction": "mTLS certificate required for services",
+            "request_id": request_id,
         }
     )
 
 
 # Legacy JWT-only endpoint (for backward compatibility)
 @api_bp.route("/legacy/documents", methods=["GET"])
-@jwt_required()
+@require_jwt  # Only JWT tokens allowed (no mTLS fallback)
 def legacy_get_documents():
     """Legacy endpoint - JWT only (for backward compatibility)"""
+    request_id = str(uuid.uuid4())
+
+    # Log legacy endpoint access warning
+    zta_logger.log_event(
+        "LEGACY_ENDPOINT_ACCESS",
+        {
+            "warning": "Legacy JWT-only endpoint accessed",
+            "recommendation": "Migrate to ZTA endpoints",
+            "security_level": "reduced",
+        },
+        request_id=request_id,
+    )
+
     current_app.logger.warning(
         "Legacy JWT-only endpoint accessed - consider migrating to ZTA endpoints"
     )
 
-    # Call the original function logic
-    return get_documents()
+    # Call the get_documents function logic
+    try:
+        claims = get_user_claims()
+        if not claims:
+            zta_logger.log_event(
+                EVENT_TYPES["ACCESS_DENIED"],
+                {"reason": "Authentication required", "endpoint": "legacy_documents"},
+                request_id=request_id,
+            )
+            return jsonify({"error": "Authentication required"}), 401
+
+        user_id = claims["sub"]
+        user_class = claims["user_class"]
+        user_facility = claims.get("facility")
+        user_department = claims.get("department")
+        auth_method = claims.get("auth_method", "unknown")
+
+        # Log legacy access
+        zta_logger.log_event(
+            "LEGACY_DOCUMENT_ACCESS",
+            {
+                "user_class": user_class,
+                "auth_method": auth_method,
+                "zta_compliance": "partial",
+                "missing_layers": ["mTLS", "OPA_policy_check"],
+            },
+            user_id=user_id,
+            request_id=request_id,
+        )
+
+        # Simple query for legacy endpoint
+        query = GovernmentDocument.query.filter_by(
+            facility=user_facility, is_archived=False
+        )
+
+        if user_class in ["user", "admin"]:
+            query = query.filter_by(department=user_department)
+
+        documents = query.order_by(GovernmentDocument.created_at.desc()).all()
+
+        return (
+            jsonify(
+                {
+                    "documents": [
+                        {
+                            "id": doc.id,
+                            "document_id": doc.document_id,
+                            "title": doc.title,
+                            "description": doc.description,
+                            "classification": doc.classification,
+                            "department": doc.department,
+                        }
+                        for doc in documents
+                    ],
+                    "legacy_warning": "This endpoint uses JWT only. Migrate to /api/documents for dual authentication support.",
+                    "auth_method": auth_method,
+                    "zta_context": {
+                        "security_level": "reduced",
+                        "missing_features": ["mTLS", "OPA_policy_enforcement"],
+                        "request_id": request_id,
+                    },
+                }
+            ),
+            200,
+        )
+
+    except Exception as e:
+        zta_logger.log_event(
+            "LEGACY_ENDPOINT_ERROR",
+            {"error": str(e), "endpoint": "legacy_documents"},
+            request_id=request_id,
+        )
+        return jsonify({"error": "Failed to fetch documents", "message": str(e)}), 500
+
+
+# Certificate verification logging endpoint
+@api_bp.route("/certificate/verify", methods=["POST"])
+@require_mtls  # Requires mTLS certificate
+def verify_certificate():
+    """Endpoint to verify and log certificate details"""
+    try:
+        request_id = getattr(g, "request_id", str(uuid.uuid4()))
+        
+        # Get certificate from g object
+        if not hasattr(g, "client_certificate"):
+            return jsonify({"error": "No certificate provided"}), 400
+        
+        cert_info = g.client_certificate
+        
+        # Extract certificate details for logging
+        from app.mTLS.cert_manager import cert_manager
+        
+        # Get certificate PEM if available
+        cert_pem = request.environ.get("SSL_CLIENT_CERT")
+        if cert_pem:
+            # Use enhanced logging
+            is_valid, detailed_info, validation_checks = cert_manager.validate_certificate_with_detailed_logging(
+                cert_pem, request_id, request.remote_addr
+            )
+        else:
+            # Fallback to basic info
+            is_valid = True
+            detailed_info = cert_info
+            validation_checks = {}
+        
+        # Log certificate verification details
+        zta_logger.log_event(
+            "CERTIFICATE_VERIFICATION_DETAILED",
+            {
+                "certificate_info": detailed_info,
+                "validation_checks": validation_checks,
+                "is_valid": is_valid,
+                "client_ip": request.remote_addr,
+                "verification_timestamp": datetime.utcnow().isoformat(),
+            },
+            request_id=request_id,
+        )
+        
+        return jsonify({
+            "status": "success",
+            "certificate_valid": is_valid,
+            "certificate_details": detailed_info,
+            "validation_checks": validation_checks,
+            "zta_context": {
+                "verification_method": "mTLS_certificate",
+                "request_id": request_id,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+        }), 200
+        
+    except Exception as e:
+        zta_logger.log_event(
+            "CERTIFICATE_VERIFICATION_ERROR",
+            {"error": str(e), "client_ip": request.remote_addr},
+            request_id=getattr(g, "request_id", str(uuid.uuid4())),
+        )
+        return jsonify({"error": "Certificate verification failed", "message": str(e)}), 500

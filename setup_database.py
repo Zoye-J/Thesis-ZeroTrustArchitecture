@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Database setup script for ZTA Government Document System
+Smart Database Setup for ZTA Government Document System
+Handles existing data gracefully
 """
 import sys
 import os
@@ -10,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
 def setup_database():
-    """Create database tables and add government test users"""
+    """Create or update database for ZTA system"""
     try:
         from app import create_app, db
         from app.models.user import User, GovernmentDocument, Facility, Department
@@ -18,15 +19,20 @@ def setup_database():
         app = create_app()
 
         with app.app_context():
+            print("=" * 60)
+            print("ZTA GOVERNMENT SYSTEM - DATABASE SETUP")
+            print("=" * 60)
 
             # Create all tables
-            print("Creating database tables...")
+            print("\n1. Creating/verifying database tables...")
             db.create_all()
-            print("✓ Tables created successfully!")
+            print("✓ Tables ready")
 
-            # Create facilities
-            print("\nCreating government facilities...")
-            facilities = [
+            # Check existing facilities
+            existing_facilities = {f.code: f for f in Facility.query.all()}
+
+            # Facilities to create
+            facilities_data = [
                 {
                     "name": "Ministry of Defence",
                     "code": "MOD",
@@ -47,18 +53,26 @@ def setup_database():
                 },
             ]
 
+            print("\n2. Setting up government facilities...")
             facility_objects = {}
-            for fac_data in facilities:
-                facility = Facility(**fac_data)
-                db.session.add(facility)
-                facility_objects[fac_data["code"]] = facility
-                print(f"  Created: {fac_data['name']} ({fac_data['code']})")
+            for fac_data in facilities_data:
+                if fac_data["code"] in existing_facilities:
+                    print(f"  ✓ {fac_data['name']} ({fac_data['code']}) already exists")
+                    facility_objects[fac_data["code"]] = existing_facilities[
+                        fac_data["code"]
+                    ]
+                else:
+                    facility = Facility(**fac_data)
+                    db.session.add(facility)
+                    db.session.flush()
+                    facility_objects[fac_data["code"]] = facility
+                    print(f"  + Created: {fac_data['name']} ({fac_data['code']})")
 
             db.session.commit()
 
-            # Create departments for each facility
-            print("\nCreating departments...")
-            departments = [
+            # Create departments
+            print("\n3. Setting up departments...")
+            departments_data = [
                 {"facility_code": "MOD", "name": "Operations", "code": "OPS"},
                 {"facility_code": "MOD", "name": "Intelligence", "code": "INT"},
                 {"facility_code": "MOD", "name": "Logistics", "code": "LOG"},
@@ -68,152 +82,160 @@ def setup_database():
                 {"facility_code": "NSA", "name": "Counter Intelligence", "code": "CTI"},
             ]
 
-            for dept_data in departments:
-                facility = facility_objects[dept_data["facility_code"]]
-                department = Department(
-                    name=dept_data["name"],
+            for dept_data in departments_data:
+                # Check if department exists
+                existing = Department.query.filter_by(
                     code=dept_data["code"],
-                    facility_id=facility.id,
+                    facility_id=facility_objects[dept_data["facility_code"]].id,
+                ).first()
+
+                if not existing:
+                    department = Department(
+                        name=dept_data["name"],
+                        code=dept_data["code"],
+                        facility_id=facility_objects[dept_data["facility_code"]].id,
+                    )
+                    db.session.add(department)
+                    print(
+                        f"  + Created: {dept_data['name']} in {dept_data['facility_code']}"
+                    )
+
+            db.session.commit()
+
+            # Create or update test users
+            print("\n4. Setting up government users...")
+
+            users_data = [
+                # MOD Users
+                {
+                    "username": "mod_admin",
+                    "email": "admin@mod.gov",
+                    "password": "Admin@123",
+                    "user_class": "superadmin",
+                    "facility": "Ministry of Defence",
+                    "department": "Operations",
+                    "clearance_level": "TOP_SECRET",
+                },
+                {
+                    "username": "intel_officer",
+                    "email": "intel@mod.gov",
+                    "password": "Intel@123",
+                    "user_class": "admin",
+                    "facility": "Ministry of Defence",
+                    "department": "Intelligence",
+                    "clearance_level": "SECRET",
+                },
+                {
+                    "username": "logistics",
+                    "email": "logistics@mod.gov",
+                    "password": "Logistics@123",
+                    "user_class": "user",
+                    "facility": "Ministry of Defence",
+                    "department": "Logistics",
+                    "clearance_level": "CONFIDENTIAL",
+                },
+                # MOF Users
+                {
+                    "username": "mof_admin",
+                    "email": "admin@mof.gov",
+                    "password": "Admin@123",
+                    "user_class": "admin",
+                    "facility": "Ministry of Finance",
+                    "department": "Budget",
+                    "clearance_level": "SECRET",
+                },
+                {
+                    "username": "tax_officer",
+                    "email": "tax@mof.gov",
+                    "password": "Tax@123",
+                    "user_class": "user",
+                    "facility": "Ministry of Finance",
+                    "department": "Taxation",
+                    "clearance_level": "CONFIDENTIAL",
+                },
+                # NSA Users
+                {
+                    "username": "cyber_analyst",
+                    "email": "cyber@nsa.gov",
+                    "password": "Cyber@123",
+                    "user_class": "admin",
+                    "facility": "National Security Agency",
+                    "department": "Cyber Security",
+                    "clearance_level": "TOP_SECRET",
+                },
+                # Legacy user
+                {
+                    "username": "admin",
+                    "email": "admin@zta.gov",
+                    "password": "Admin123",
+                    "user_class": "superadmin",
+                    "facility": "IT Department",
+                    "department": "Administration",
+                    "clearance_level": "TOP_SECRET",
+                },
+            ]
+
+            for user_data in users_data:
+                existing_user = User.query.filter_by(email=user_data["email"]).first()
+
+                if existing_user:
+                    # Update if needed
+                    print(
+                        f"  ✓ User exists: {user_data['username']} ({user_data['email']})"
+                    )
+                else:
+                    user = User(
+                        username=user_data["username"],
+                        email=user_data["email"],
+                        user_class=user_data["user_class"],
+                        facility=user_data["facility"],
+                        department=user_data["department"],
+                        clearance_level=user_data["clearance_level"],
+                    )
+                    user.set_password(user_data["password"])
+                    db.session.add(user)
+                    print(
+                        f"  + Created: {user_data['username']} ({user_data['email']})"
+                    )
+
+            db.session.commit()
+
+            # Create sample documents if none exist
+            print("\n5. Checking sample documents...")
+            if GovernmentDocument.query.count() == 0:
+                create_sample_documents()
+            else:
+                print(
+                    f"  ✓ Database has {GovernmentDocument.query.count()} existing documents"
                 )
-                db.session.add(department)
-                print(f"  Created: {dept_data['name']} in {dept_data['facility_code']}")
-
-            db.session.commit()
-
-            # Create test users for each facility
-            print("\nCreating government test users...")
-
-            # MOD Users
-            superadmin = User(
-                username="mod_admin",
-                email="admin@mod.gov",
-                user_class="superadmin",
-                facility="Ministry of Defence",
-                department="Operations",
-                clearance_level="TOP_SECRET",
-            )
-            superadmin.set_password("Admin@123")
-            db.session.add(superadmin)
-            print("  Created: mod_admin (Ministry of Defence, Operations, TOP_SECRET)")
-
-            # MOD Intelligence Officer
-            mod_intel = User(
-                username="intel_officer",
-                email="intel@mod.gov",
-                user_class="admin",
-                facility="Ministry of Defence",
-                department="Intelligence",
-                clearance_level="SECRET",
-            )
-            mod_intel.set_password("Intel@123")
-            db.session.add(mod_intel)
-            print(
-                "  Created: intel_officer (Ministry of Defence, Intelligence, SECRET)"
-            )
-
-            # MOD Logistics Officer
-            mod_log = User(
-                username="logistics",
-                email="logistics@mod.gov",
-                user_class="user",
-                facility="Ministry of Defence",
-                department="Logistics",
-                clearance_level="CONFIDENTIAL",
-            )
-            mod_log.set_password("Logistics@123")
-            db.session.add(mod_log)
-            print("  Created: logistics (Ministry of Defence, Logistics, CONFIDENTIAL)")
-
-            # MOF Users
-            mof_admin = User(
-                username="mof_admin",
-                email="admin@mof.gov",
-                user_class="admin",
-                facility="Ministry of Finance",
-                department="Budget",
-                clearance_level="SECRET",
-            )
-            mof_admin.set_password("Admin@123")
-            db.session.add(mof_admin)
-            print("  Created: mof_admin (Ministry of Finance, Budget, SECRET)")
-
-            # MOF Tax Officer
-            mof_tax = User(
-                username="tax_officer",
-                email="tax@mof.gov",
-                user_class="user",
-                facility="Ministry of Finance",
-                department="Taxation",
-                clearance_level="CONFIDENTIAL",
-            )
-            mof_tax.set_password("Tax@123")
-            db.session.add(mof_tax)
-            print(
-                "  Created: tax_officer (Ministry of Finance, Taxation, CONFIDENTIAL)"
-            )
-
-            # NSA Users
-            nsa_analyst = User(
-                username="cyber_analyst",
-                email="cyber@nsa.gov",
-                user_class="admin",
-                facility="National Security Agency",
-                department="Cyber Security",
-                clearance_level="TOP_SECRET",
-            )
-            nsa_analyst.set_password("Cyber@123")
-            db.session.add(nsa_analyst)
-            print("  Created: cyber_analyst (NSA, Cyber Security, TOP_SECRET)")
-
-            # Also keep the old admin user for compatibility
-            old_admin = User(
-                username="admin",
-                email="admin@zta.gov",
-                user_class="superadmin",
-                facility="IT Department",
-                department="Administration",
-                clearance_level="TOP_SECRET",
-            )
-            old_admin.set_password("Admin123")
-            db.session.add(old_admin)
-            print(
-                "  Created: admin (IT Department, Administration, TOP_SECRET) - Legacy user"
-            )
-
-            # Commit all users
-            db.session.commit()
-
-            # Create sample government documents
-            print("\nCreating sample government documents...")
-            create_sample_documents()
 
             print("\n" + "=" * 60)
-            print("GOVERNMENT DOCUMENT SYSTEM - SETUP COMPLETE")
-            print("=" * 60)
-            print("\nTest Users Created:")
-            print("-" * 60)
-            print("Ministry of Defence:")
-            print("  Superadmin: mod_admin / Admin@123 (TOP_SECRET)")
-            print("  Intelligence Officer: intel_officer / Intel@123 (SECRET)")
-            print("  Logistics Officer: logistics / Logistics@123 (CONFIDENTIAL)")
-            print("\nMinistry of Finance:")
-            print("  Admin: mof_admin / Admin@123 (SECRET)")
-            print("  Tax Officer: tax_officer / Tax@123 (CONFIDENTIAL)")
-            print("\nNational Security Agency:")
-            print("  Cyber Analyst: cyber_analyst / Cyber@123 (TOP_SECRET)")
-            print("\nLegacy User (for testing):")
-            print("  Superadmin: admin / Admin123 (TOP_SECRET)")
-            print("-" * 60)
-            print("\nAccess the system at: http://localhost:5000")
-            print("Use the credentials above to login")
+            print("SETUP COMPLETE - SYSTEM READY FOR DEMONSTRATION")
             print("=" * 60)
 
-    except ImportError as e:
-        print(f"Import error: {e}")
-        print("Please make sure all required files exist.")
-        sys.exit(1)
+            print("\nDEMONSTRATION CREDENTIALS:")
+            print("-" * 60)
+            print("Ministry of Defence:")
+            print("  • Superadmin: mod_admin / Admin@123 (TOP_SECRET)")
+            print("  • Intelligence: intel_officer / Intel@123 (SECRET)")
+            print("  • Logistics: logistics / Logistics@123 (CONFIDENTIAL)")
+            print("\nMinistry of Finance:")
+            print("  • Admin: mof_admin / Admin@123 (SECRET)")
+            print("  • Tax Officer: tax_officer / Tax@123 (CONFIDENTIAL)")
+            print("\nNational Security Agency:")
+            print("  • Cyber Analyst: cyber_analyst / Cyber@123 (TOP_SECRET)")
+            print("\nLegacy Admin:")
+            print("  • Superadmin: admin / Admin123 (TOP_SECRET)")
+            print("-" * 60)
+
+            print("\nZTA ARCHITECTURE PORTS:")
+            print("• Main Server (JWT): http://localhost:5000")
+            print("• API Server (mTLS): https://localhost:8443")
+            print("• OPA Agent: http://localhost:8181")
+            print("=" * 60)
+
     except Exception as e:
-        print(f"Error setting up database: {e}")
+        print(f"Error: {e}")
         import traceback
 
         traceback.print_exc()
@@ -228,6 +250,10 @@ def create_sample_documents():
         from datetime import datetime, timedelta
 
         users = User.query.all()
+
+        if not users:
+            print("  ⚠ No users found to create documents")
+            return
 
         sample_documents = [
             {
@@ -318,33 +344,34 @@ def create_sample_documents():
             # Generate document ID
             doc_id = f"{doc_data['facility'][:3].upper()}-{doc_data['department'][:3].upper()}-{datetime.utcnow().strftime('%Y%m%d')}-{document_count + 1:04d}"
 
-            document = GovernmentDocument(
-                document_id=doc_id,
-                title=doc_data["title"],
-                description=doc_data["description"],
-                content=doc_data["content"],
-                classification=doc_data["classification"],
-                facility=doc_data["facility"],
-                department=doc_data["department"],
-                category=doc_data["category"],
-                owner_id=owner.id,
-                created_by=owner.id,
-                expiry_date=doc_data["expiry_date"],
-            )
-            db.session.add(document)
-            document_count += 1
-            print(
-                f"  Created: {doc_id} - {doc_data['title']} ({doc_data['classification']})"
-            )
+            # Check if document already exists
+            existing = GovernmentDocument.query.filter_by(document_id=doc_id).first()
+            if not existing:
+                document = GovernmentDocument(
+                    document_id=doc_id,
+                    title=doc_data["title"],
+                    description=doc_data["description"],
+                    content=doc_data["content"],
+                    classification=doc_data["classification"],
+                    facility=doc_data["facility"],
+                    department=doc_data["department"],
+                    category=doc_data["category"],
+                    owner_id=owner.id,
+                    created_by=owner.id,
+                    expiry_date=doc_data["expiry_date"],
+                )
+                db.session.add(document)
+                document_count += 1
+                print(f"  + Created: {doc_id} - {doc_data['title']}")
 
-        db.session.commit()
-        print(f"✓ {document_count} sample government documents created!")
+        if document_count > 0:
+            db.session.commit()
+            print(f"✓ Created {document_count} sample documents")
+        else:
+            print("  ✓ Sample documents already exist")
 
     except Exception as e:
         print(f"Warning: Could not create sample documents: {e}")
-        import traceback
-
-        traceback.print_exc()
 
 
 if __name__ == "__main__":
