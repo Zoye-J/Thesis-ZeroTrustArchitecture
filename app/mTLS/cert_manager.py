@@ -21,13 +21,19 @@ class CertificateManager:
         self.cert_dir = cert_dir
         self.ca_cert_path = os.path.join(cert_dir, "ca.crt")
         self.ca_key_path = os.path.join(cert_dir, "ca.key")
-        self.ensure_cert_dir()
+        # NEW: Add keys directory
+        self.keys_dir = os.path.join(cert_dir, "user_keys")
+        self.ensure_dirs()
 
-    def ensure_cert_dir(self):
-        """Ensure certificate directory exists"""
+    def ensure_dirs(self):
+        """Ensure all directories exist"""
         if not os.path.exists(self.cert_dir):
             os.makedirs(self.cert_dir)
             print(f"Created certificate directory: {self.cert_dir}")
+        # NEW: Ensure keys directory
+        if not os.path.exists(self.keys_dir):
+            os.makedirs(self.keys_dir)
+            print(f"Created keys directory: {self.keys_dir}")
 
     def run_openssl_command(self, cmd):
         """Execute OpenSSL command"""
@@ -169,77 +175,75 @@ class CertificateManager:
 
         return False, cert_info, validation_checks
 
+    def log_certificate_verification_summary(self, cert_pem, request_id, client_ip):
+        """Create a summary log entry for certificate verification"""
+        from app.logs.zta_event_logger import zta_logger
 
-def log_certificate_verification_summary(self, cert_pem, request_id, client_ip):
-    """Create a summary log entry for certificate verification"""
-    from app.logs.zta_event_logger import zta_logger
+        try:
+            cert = x509.load_pem_x509_certificate(cert_pem.encode(), default_backend())
+            fingerprint = cert.fingerprint(hashes.SHA256()).hex()
 
-    try:
-        cert = x509.load_pem_x509_certificate(cert_pem.encode(), default_backend())
-        fingerprint = cert.fingerprint(hashes.SHA256()).hex()
+            # Extract certificate chain info
+            subject_info = {}
+            for attr in cert.subject:
+                subject_info[attr.oid._name] = attr.value
 
-        # Extract certificate chain info
-        subject_info = {}
-        for attr in cert.subject:
-            subject_info[attr.oid._name] = attr.value
+            issuer_info = {}
+            for attr in cert.issuer:
+                issuer_info[attr.oid._name] = attr.value
 
-        issuer_info = {}
-        for attr in cert.issuer:
-            issuer_info[attr.oid._name] = attr.value
+            # Calculate remaining validity
+            now = datetime.utcnow()
+            valid_days = (cert.not_valid_after - now).days
 
-        # Calculate remaining validity
-        now = datetime.utcnow()
-        valid_days = (cert.not_valid_after - now).days
-
-        # Log certificate verification summary
-        summary = {
-            "certificate_fingerprint": fingerprint,
-            "subject": subject_info,
-            "issuer": issuer_info,
-            "validity": {
-                "from": cert.not_valid_before.isoformat(),
-                "to": cert.not_valid_after.isoformat(),
-                "remaining_days": valid_days,
-                "is_expired": valid_days <= 0,
-            },
-            "client_ip": client_ip,
-            "verification_timestamp": now.isoformat(),
-            "certificate_strength": "RSA-2048",  # You can extract this from cert
-            "key_usage": self.extract_key_usage(cert),
-        }
-
-        zta_logger.log_event(
-            "CERTIFICATE_VERIFICATION_SUMMARY", summary, request_id=request_id
-        )
-
-        return summary
-
-    except Exception as e:
-        zta_logger.log_event(
-            "CERTIFICATE_SUMMARY_ERROR",
-            {"error": str(e), "client_ip": client_ip},
-            request_id=request_id,
-        )
-        return None
-
-
-def extract_key_usage(self, cert):
-    """Extract key usage information from certificate"""
-    key_usage = {}
-    try:
-        ku_ext = cert.extensions.get_extension_for_class(x509.KeyUsage)
-        if ku_ext:
-            key_usage = {
-                "digital_signature": ku_ext.value.digital_signature,
-                "key_encipherment": ku_ext.value.key_encipherment,
-                "data_encipherment": ku_ext.value.data_encipherment,
-                "key_agreement": ku_ext.value.key_agreement,
-                "key_cert_sign": ku_ext.value.key_cert_sign,
-                "crl_sign": ku_ext.value.crl_sign,
+            # Log certificate verification summary
+            summary = {
+                "certificate_fingerprint": fingerprint,
+                "subject": subject_info,
+                "issuer": issuer_info,
+                "validity": {
+                    "from": cert.not_valid_before.isoformat(),
+                    "to": cert.not_valid_after.isoformat(),
+                    "remaining_days": valid_days,
+                    "is_expired": valid_days <= 0,
+                },
+                "client_ip": client_ip,
+                "verification_timestamp": now.isoformat(),
+                "certificate_strength": "RSA-2048",  # You can extract this from cert
+                "key_usage": self.extract_key_usage(cert),
             }
-    except:
-        pass
-    return key_usage
+
+            zta_logger.log_event(
+                "CERTIFICATE_VERIFICATION_SUMMARY", summary, request_id=request_id
+            )
+
+            return summary
+
+        except Exception as e:
+            zta_logger.log_event(
+                "CERTIFICATE_SUMMARY_ERROR",
+                {"error": str(e), "client_ip": client_ip},
+                request_id=request_id,
+            )
+            return None
+
+    def extract_key_usage(self, cert):
+        """Extract key usage information from certificate"""
+        key_usage = {}
+        try:
+            ku_ext = cert.extensions.get_extension_for_class(x509.KeyUsage)
+            if ku_ext:
+                key_usage = {
+                    "digital_signature": ku_ext.value.digital_signature,
+                    "key_encipherment": ku_ext.value.key_encipherment,
+                    "data_encipherment": ku_ext.value.data_encipherment,
+                    "key_agreement": ku_ext.value.key_agreement,
+                    "key_cert_sign": ku_ext.value.key_cert_sign,
+                    "crl_sign": ku_ext.value.crl_sign,
+                }
+        except:
+            pass
+        return key_usage
 
     def generate_root_ca(self):
         """Generate Root Certificate Authority"""
@@ -508,6 +512,120 @@ subjectAltName = email:{email}
                 revoked = json.load(f)
                 return any(entry["serial"] == serial for entry in revoked)
         return False
+
+    # =========================================================================
+    # NEW RSA KEY FUNCTIONS - MINIMAL ADDITION
+    # =========================================================================
+
+    def generate_rsa_key_pair(self, user_id, email):
+        """Generate RSA key pair for a user (simplified version)"""
+        # Create user-specific directory
+        user_key_dir = os.path.join(self.keys_dir, str(user_id))
+        os.makedirs(user_key_dir, exist_ok=True)
+
+        # Generate private key
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+        )
+
+        # Generate public key
+        public_key = private_key.public_key()
+
+        # Serialize private key (PEM format)
+        private_pem = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+
+        # Serialize public key (PEM format)
+        public_pem = public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+
+        # Save keys to files
+        private_key_path = os.path.join(user_key_dir, "private.pem")
+        public_key_path = os.path.join(user_key_dir, "public.pem")
+
+        with open(private_key_path, "wb") as f:
+            f.write(private_pem)
+
+        with open(public_key_path, "wb") as f:
+            f.write(public_pem)
+
+        # Return key info
+        return {
+            "user_id": user_id,
+            "email": email,
+            "public_key": public_pem.decode("utf-8"),
+            "private_key_path": private_key_path,
+            "public_key_path": public_key_path,
+            "key_size": 2048,
+            "algorithm": "RSA",
+            "generated_at": datetime.now().isoformat(),
+        }
+
+    def get_user_public_key(self, user_id):
+        """Get user's public key from storage"""
+        user_key_dir = os.path.join(self.keys_dir, str(user_id))
+        public_key_path = os.path.join(user_key_dir, "public.pem")
+
+        if os.path.exists(public_key_path):
+            with open(public_key_path, "r") as f:
+                return f.read()
+        return None
+
+    def generate_opa_agent_keys(self):
+        """Generate RSA keys for OPA Agent (simplified)"""
+        agent_key_dir = os.path.join(self.cert_dir, "opa_agent")
+        os.makedirs(agent_key_dir, exist_ok=True)
+
+        # Generate private key
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+        )
+
+        # Generate public key
+        public_key = private_key.public_key()
+
+        # Serialize keys
+        private_pem = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+
+        public_pem = public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+
+        # Save to files
+        private_key_path = os.path.join(agent_key_dir, "private.pem")
+        public_key_path = os.path.join(agent_key_dir, "public.pem")
+
+        with open(private_key_path, "wb") as f:
+            f.write(private_pem)
+
+        with open(public_key_path, "wb") as f:
+            f.write(public_pem)
+
+        print(f"✓ OPA Agent keys generated in: {agent_key_dir}")
+        return public_pem.decode("utf-8")
+
+    def load_opa_agent_public_key(self):
+        """Load OPA Agent's public key"""
+        public_key_path = os.path.join(self.cert_dir, "opa_agent", "public.pem")
+
+        if os.path.exists(public_key_path):
+            with open(public_key_path, "r") as f:
+                return f.read()
+
+        # Generate if doesn't exist
+        return self.generate_opa_agent_keys()
 
 
 # Singleton instance

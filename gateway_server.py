@@ -19,7 +19,7 @@ from app.gateway_app import create_gateway_app
 app = create_gateway_app()
 
 # Import real service communicator
-from app.services.service_communicator import process_gateway_request
+from app.services.service_communicator import process_encrypted_request
 
 
 @app.before_request
@@ -105,7 +105,7 @@ def gateway_proxy(subpath):
             return jsonify({"error": "Authentication required"}), 401
 
         # Use REAL service communicator to process request
-        return process_gateway_request(request, user_claims)
+        return process_encrypted_request(request, user_claims)
 
     except Exception as e:
         return (

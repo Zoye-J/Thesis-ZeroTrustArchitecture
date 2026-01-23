@@ -12,6 +12,7 @@ from app.logs.zta_event_logger import zta_logger, EVENT_TYPES
 import uuid
 from cryptography.hazmat.backends import default_backend
 from cryptography import x509
+from cryptography.hazmat.primitives import serialization
 
 
 def extract_client_certificate():
@@ -35,6 +36,28 @@ def extract_client_certificate():
             pass
 
     return cert_pem
+
+
+def extract_public_key_from_cert(cert_pem):
+    """Extract public key from certificate for encryption"""
+    try:
+        # Load certificate
+        cert = x509.load_pem_x509_certificate(cert_pem.encode(), default_backend())
+
+        # Get public key
+        public_key = cert.public_key()
+
+        # Serialize to PEM
+        public_pem = public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+
+        return public_pem.decode("utf-8")
+
+    except Exception as e:
+        current_app.logger.error(f"Failed to extract public key: {e}")
+        return None
 
 
 def require_authentication(f):
@@ -81,6 +104,11 @@ def require_authentication(f):
                     g.client_certificate = cert_info
                     g.auth_method = "mtls"
 
+                    # Extract and store public key from certificate
+                    public_key = extract_public_key_from_cert(cert_pem)
+                    if public_key:
+                        g.client_public_key = public_key
+
                     # Try to find user in database
                     try:
                         from app.models.user import User
@@ -114,13 +142,25 @@ def require_authentication(f):
                 g.auth_method = "jwt"
                 g.jwt_identity = user_identity
 
-                # Try to load user from database
+                # Try to get user's stored public key from database
                 try:
                     from app.models.user import User
+                    from app.mTLS.cert_manager import cert_manager
 
                     user = User.query.get(user_identity)
                     if user:
                         g.current_user = user
+
+                        # Get user's public key (from database or key storage)
+                        if user.public_key:
+                            g.client_public_key = user.public_key
+                        else:
+                            # Try to get from key storage
+                            user_public_key = cert_manager.get_user_public_key(
+                                user_id=user.id
+                            )
+                            if user_public_key:
+                                g.client_public_key = user_public_key
                 except:
                     pass
 
@@ -226,6 +266,11 @@ def require_mtls(f):
                 401,
             )
 
+        # Extract and store public key
+        public_key = extract_public_key_from_cert(cert_pem)
+        if public_key:
+            g.client_public_key = public_key
+
         # Log successful mTLS authentication
         zta_logger.log_event(
             EVENT_TYPES["MTLS_CERT_VALIDATED"],
@@ -271,6 +316,22 @@ def require_jwt(f):
 
             g.auth_method = "jwt"
             g.jwt_identity = user_identity
+
+            # Try to get user's stored public key
+            try:
+                from app.models.user import User
+                from app.mTLS.cert_manager import cert_manager
+
+                user = User.query.get(user_identity)
+                if user and user.public_key:
+                    g.client_public_key = user.public_key
+                elif user:
+                    # Try to get from key storage
+                    user_public_key = cert_manager.get_user_public_key(user_id=user.id)
+                    if user_public_key:
+                        g.client_public_key = user_public_key
+            except:
+                pass
 
             current_app.logger.info(
                 f"JWT authentication required for user {user_identity}"

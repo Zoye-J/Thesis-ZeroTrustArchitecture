@@ -3,9 +3,12 @@ from app.api_models import db, User
 from werkzeug.security import generate_password_hash
 from datetime import datetime
 import re
+import hashlib  # ADD THIS
+import os  # ADD THIS
+import json  # ADD THIS
 from app.logs.zta_event_logger import zta_logger, EVENT_TYPES
-from datetime import datetime
 import uuid
+from app.opa_agent.crypto_handler import CryptoHandler  # This will need to be created
 
 registration_bp = Blueprint("registration", __name__)
 
@@ -24,8 +27,68 @@ DOMAIN_TO_DEFAULT_DEPT = {
 }
 
 
+# ADD THIS HELPER FUNCTION
+def store_private_key(user_id, private_key_pem):
+    """Store user's private key securely (in production, use HSM or KMS)"""
+    # For development, store in a secure directory
+    keys_dir = "keys/private"
+    os.makedirs(keys_dir, exist_ok=True)
+
+    key_file = os.path.join(keys_dir, f"user_{user_id}.pem")
+
+    with open(key_file, "wb") as f:
+        f.write(private_key_pem)
+
+    # Set secure permissions (Unix only)
+    try:
+        os.chmod(key_file, 0o600)  # Read/write for owner only
+    except:
+        pass
+
+    return key_file
+
+
+# MODIFY THIS FUNCTION
+def generate_user_keys(user_id):
+    """Generate RSA key pair for new user"""
+    try:
+        # Import here to avoid circular imports
+        from app.opa_agent.crypto_handler import CryptoHandler
+
+        crypto = CryptoHandler()
+        private_key_pem, public_key_pem = crypto.generate_key_pair()
+
+        # Store public key in user record
+        user = User.query.get(user_id)
+        if not user:
+            raise ValueError(f"User {user_id} not found")
+
+        # Calculate fingerprint
+        fingerprint = hashlib.sha256(public_key_pem).hexdigest()
+
+        # Update user with public key
+        user.public_key = public_key_pem.decode("utf-8")
+        user.public_key_fingerprint = fingerprint
+
+        db.session.commit()
+
+        # Store private key securely
+        private_key_path = store_private_key(user_id, private_key_pem)
+
+        print(f"✅ Generated RSA keys for user {user.username}")
+        print(f"   Public key fingerprint: {fingerprint[:16]}...")
+        print(f"   Private key stored at: {private_key_path}")
+
+        return public_key_pem.decode("utf-8"), private_key_path
+
+    except Exception as e:
+        print(f"❌ Error generating keys for user {user_id}: {e}")
+        raise
+
+
+# MODIFY THE MAIN REGISTRATION FUNCTION
 @registration_bp.route("/", methods=["POST"])
-@registration_bp.route("", methods=["POST"])  # Add this line to handle both routes
+@registration_bp.route("", methods=["POST"])
 def register_user():
     try:
         print("=" * 50)
@@ -34,42 +97,22 @@ def register_user():
 
         request_id = str(uuid.uuid4())
         print(f"Request ID: {request_id}")
-        print(f"Request method: {request.method}")
-        print(f"Request URL: {request.url}")
-        print(f"Request headers: {dict(request.headers)}")
 
         # Check content type
         content_type = request.headers.get("Content-Type", "")
-        print(f"Content-Type: {content_type}")
-
         if "application/json" not in content_type:
-            print("ERROR: Content-Type is not application/json")
             return jsonify({"error": "Content-Type must be application/json"}), 400
 
         try:
             data = request.get_json()
-            print(f"Received JSON data: {data}")
         except Exception as json_error:
-            print(f"ERROR parsing JSON: {json_error}")
-            print(f"Request data: {request.data}")
             return jsonify({"error": "Invalid JSON"}), 400
 
         if not data:
-            print("ERROR: No data provided")
             return jsonify({"error": "No data provided"}), 400
-        email = data["email"].lower()
-        username = data["username"].lower()
 
-        # Log registration attempt
-        zta_logger.log_event(
-            "REGISTRATION_ATTEMPT",
-            {
-                "email": email,
-                "username": username,
-                "timestamp": datetime.utcnow().isoformat(),
-            },
-            request_id=request_id,
-        )
+        email = data.get("email", "").lower()
+        username = data.get("username", "").lower()
 
         # Validate required fields
         required_fields = ["full_name", "email", "username", "password"]
@@ -145,7 +188,7 @@ def register_user():
         print(f"Facility: {facility}")
         print(f"Department: {department}")
 
-        # Create new user
+        # Create new user (WITHOUT public key initially)
         new_user = User(
             username=username,
             email=email,
@@ -155,16 +198,27 @@ def register_user():
             clearance_level="BASIC",
             is_active=True,
             created_at=datetime.utcnow(),
+            public_key=None,  # Will be set after key generation
+            public_key_fingerprint=None,
         )
 
-        # Set password with proper hashing
+        # Set password
         new_user.password_hash = generate_password_hash(password)
-        print(f"Password hashed successfully")
 
         db.session.add(new_user)
         db.session.commit()
 
-        print(f"User {username} created with ID: {new_user.id}")
+        print(f"✅ User {username} created with ID: {new_user.id}")
+
+        # STEP 2: Generate RSA keys for the user
+        try:
+            public_key, private_key_path = generate_user_keys(new_user.id)
+            print(f"✅ RSA keys generated for user {new_user.id}")
+        except Exception as key_error:
+            print(f"⚠️ Failed to generate RSA keys: {key_error}")
+            # Continue anyway - user can login but won't have encrypted workflow
+            public_key = None
+            private_key_path = None
 
         # Log successful registration
         zta_logger.log_event(
@@ -176,43 +230,42 @@ def register_user():
                 "facility": new_user.facility,
                 "department": new_user.department,
                 "clearance": new_user.clearance_level,
+                "has_rsa_keys": public_key is not None,
                 "action": "user_registered",
             },
             user_id=new_user.id,
             request_id=request_id,
         )
 
-        return (
-            jsonify(
-                {
-                    "success": True,
-                    "message": "Registration successful! You can now login.",
-                    "user": {
-                        "id": new_user.id,
-                        "username": new_user.username,
-                        "email": new_user.email,
-                        "user_class": new_user.user_class,
-                        "facility": new_user.facility,
-                        "department": new_user.department,
-                        "clearance_level": new_user.clearance_level,
-                    },
-                    "request_id": request_id,
-                }
-            ),
-            201,
-        )
+        response_data = {
+            "success": True,
+            "message": "Registration successful! You can now login.",
+            "user": {
+                "id": new_user.id,
+                "username": new_user.username,
+                "email": new_user.email,
+                "user_class": new_user.user_class,
+                "facility": new_user.facility,
+                "department": new_user.department,
+                "clearance_level": new_user.clearance_level,
+                "has_public_key": public_key is not None,
+            },
+            "request_id": request_id,
+        }
+
+        # Only include key info in development
+        if current_app.config.get("DEBUG", False) and public_key:
+            response_data["key_info"] = {
+                "public_key_fingerprint": new_user.public_key_fingerprint[:16] + "...",
+                "key_algorithm": "RSA-2048",
+                "note": "Private key stored securely on server",
+            }
+
+        return jsonify(response_data), 201
 
     except Exception as e:
         db.session.rollback()
         print(f"Registration error: {str(e)}")
-
-        # Log registration error
-        zta_logger.log_event(
-            "REGISTRATION_ERROR",
-            {"error": str(e), "email": data.get("email") if data else None},
-            request_id=request_id,
-        )
-
         import traceback
 
         traceback.print_exc()

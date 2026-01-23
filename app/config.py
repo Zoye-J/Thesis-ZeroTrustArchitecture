@@ -20,14 +20,17 @@ class Config:
     API_SERVER_PORT = int(os.environ.get("API_SERVER_PORT", 5001))
     GATEWAY_SERVER_PORT = int(os.environ.get("GATEWAY_SERVER_PORT", 5000))
     OPA_SERVER_PORT = int(os.environ.get("OPA_SERVER_PORT", 8181))
+    OPA_AGENT_PORT = int(os.environ.get("OPA_AGENT_PORT", 8282))  # NEW
 
     # ============ SERVICE COMMUNICATION URLs ============
     OPA_SERVER_URL = os.environ.get("OPA_SERVER_URL", "http://localhost:8181")
     API_SERVER_URL = os.environ.get("API_SERVER_URL", "http://localhost:5001")
     GATEWAY_SERVER_URL = os.environ.get("GATEWAY_SERVER_URL", "https://localhost:5000")
+    OPA_AGENT_URL = os.environ.get("OPA_AGENT_URL", "http://localhost:8282")  # NEW
 
     # Timeouts
     OPA_TIMEOUT = int(os.environ.get("OPA_TIMEOUT", 5))
+    OPA_AGENT_TIMEOUT = int(os.environ.get("OPA_AGENT_TIMEOUT", 10))  # NEW
     SERVICE_TIMEOUT = int(os.environ.get("SERVICE_TIMEOUT", 10))
 
     # ============ SERVICE TOKENS ============
@@ -35,12 +38,16 @@ class Config:
         "gateway": os.environ.get("GATEWAY_SERVICE_TOKEN", "gateway-token-2024-zta"),
         "api": os.environ.get("API_SERVICE_TOKEN", "api-token-2024-zta"),
         "opa": os.environ.get("OPA_SERVICE_TOKEN", "opa-token-2024-zta"),
+        "opa_agent": os.environ.get(
+            "OPA_AGENT_TOKEN", "opa-agent-token-2024-zta"
+        ),  # NEW
     }
 
     # Individual token access (for convenience)
     GATEWAY_SERVICE_TOKEN = SERVICE_TOKENS["gateway"]
     API_SERVICE_TOKEN = SERVICE_TOKENS["api"]
     OPA_SERVICE_TOKEN = SERVICE_TOKENS["opa"]
+    OPA_AGENT_TOKEN = SERVICE_TOKENS["opa_agent"]  # NEW
 
     # ============ SERVICE COMMUNICATION SETTINGS ============
     SERVICE_MTLS_ENABLED = (
@@ -58,6 +65,23 @@ class Config:
     CA_CERT_PATH = os.path.join(SSL_CERT_PATH, "ca.crt")
     SERVER_CERT_PATH = os.path.join(SSL_CERT_PATH, "server.crt")
     SERVER_KEY_PATH = os.path.join(SSL_CERT_PATH, "server.key")
+
+    # ============ ENCRYPTION CONFIGURATION ============  # NEW SECTION
+    ENCRYPTION_ENABLED = os.environ.get("ENCRYPTION_ENABLED", "true").lower() == "true"
+    RSA_KEY_SIZE = int(os.environ.get("RSA_KEY_SIZE", 2048))
+    RSA_PUBLIC_EXPONENT = int(os.environ.get("RSA_PUBLIC_EXPONENT", 65537))
+
+    # Key storage paths
+    USER_KEYS_DIR = os.environ.get("USER_KEYS_DIR", "./certs/user_keys")
+    OPA_AGENT_KEYS_DIR = os.environ.get("OPA_AGENT_KEYS_DIR", "./certs/opa_agent")
+
+    # OPA Agent key files
+    OPA_AGENT_PUBLIC_KEY_FILE = os.path.join(OPA_AGENT_KEYS_DIR, "public.pem")
+    OPA_AGENT_PRIVATE_KEY_FILE = os.path.join(OPA_AGENT_KEYS_DIR, "private.pem")
+
+    # Encryption algorithm
+    ENCRYPTION_ALGORITHM = os.environ.get("ENCRYPTION_ALGORITHM", "RSA-OAEP-SHA256")
+    NO_FALLBACK = True  # NO FALLBACK - if OPA Agent fails, access is denied
 
     # ============ SECURITY HEADERS ============
     SECURITY_HEADERS = {
@@ -93,6 +117,7 @@ class DevelopmentConfig(Config):
     MTLS_ENABLED = False  # Disable mTLS in development for easier testing
     LOG_LEVEL = "DEBUG"
     TRACING_ENABLED = True
+    ENCRYPTION_ENABLED = True  # Enable encryption in development
 
 
 class ProductionConfig(Config):
@@ -103,6 +128,8 @@ class ProductionConfig(Config):
     LOG_LEVEL = "WARNING"
     SERVICE_MTLS_ENABLED = True  # Enable mTLS between services in production
     RATE_LIMIT_ENABLED = True
+    ENCRYPTION_ENABLED = True
+    NO_FALLBACK = True  # STRICT: No fallback in production
 
 
 class TestingConfig(Config):
@@ -111,6 +138,8 @@ class TestingConfig(Config):
     MTLS_ENABLED = False
     SERVICE_MTLS_ENABLED = False
     LOG_LEVEL = "DEBUG"
+    ENCRYPTION_ENABLED = False  # Disable encryption for testing
+    NO_FALLBACK = True
 
 
 config_dict = {

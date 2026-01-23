@@ -185,3 +185,5 @@ class Department(db.Model):
     facility_id = db.Column(db.Integer, db.ForeignKey("facility.id"), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     is_active = db.Column(db.Boolean, default=True)
+    public_key = db.Column(db.Text, nullable=True)  # PEM format
+    public_key_fingerprint = db.Column(db.String(64), nullable=True)

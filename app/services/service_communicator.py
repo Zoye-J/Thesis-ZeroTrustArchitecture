@@ -1,228 +1,194 @@
 """
-REAL Service-to-Service Communication Handler
-Manages ACTUAL HTTP communication between Gateway Server, OPA, and API Server
+Service Communicator for ENCRYPTED ZTA Workflow
+Handles encrypted communication between Gateway → OPA Agent → OPA Server → API Server
 """
 
 import requests
 import json
 import uuid
-from flask import current_app, request, g
+from flask import current_app, request, g, jsonify
 import logging
 from app.logs.zta_event_logger import zta_logger, EVENT_TYPES
-import base64
-import os
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
 
-class RealServiceCommunicator:
+class EncryptedServiceCommunicator:
 
     def __init__(self):
-        self.opa_url = None
+        self.opa_agent_client = None
         self.api_server_url = None
-        self.gateway_service_token = None
-        self.api_service_token = None
         self._initialized = False
 
     def init_app(self, app):
+        """Initialize with Flask app"""
+        self.api_server_url = app.config.get("API_SERVER_URL", "https://localhost:5001")
 
-        self.opa_url = app.config.get("OPA_URL", "http://localhost:8181")
-        self.api_server_url = app.config.get(
-            "API_SERVER_URL", "http://localhost:3000"
-        )  # CHANGED: Port 3000 for API server
-        self.gateway_service_token = app.config.get(
-            "GATEWAY_SERVICE_TOKEN", "gateway-token-2024"
-        )
-        self.api_service_token = app.config.get("API_SERVICE_TOKEN", "api-token-2024")
+        # Initialize OPA Agent Client
+        try:
+            from app.opa_agent.client import init_opa_agent_client
+
+            init_opa_agent_client(app)
+            from app.opa_agent.client import get_opa_agent_client
+
+            self.opa_agent_client = get_opa_agent_client()
+            logger.info("✅ OPA Agent Client integrated into Service Communicator")
+        except ImportError as e:
+            logger.warning(f"OPA Agent not available: {e}")
+            self.opa_agent_client = None
+
         self._initialized = True
-
-        logger.info("=== REAL Service Communicator Initialized ===")
-        logger.info(f"OPA URL: {self.opa_url}")
+        logger.info("=== ENCRYPTED Service Communicator Initialized ===")
         logger.info(f"API Server URL: {self.api_server_url}")
-        logger.info("Service-to-service communication ENABLED")
+        logger.info(
+            f"OPA Agent Client: {'Available' if self.opa_agent_client else 'Not available'}"
+        )
 
-    def query_opa_for_decision(self, user_claims, request_info, request_id=None):
+    def process_encrypted_request(self, flask_request, user_claims):
         """
-        Gateway → OPA: REAL HTTP call to OPA server
-        Returns: OPA decision dict
-        """
-        if not request_id:
-            request_id = str(uuid.uuid4())
-
-        try:
-            # Prepare OPA input based on actual request
-            opa_input = self._build_opa_input(user_claims, request_info, request_id)
-
-            # REAL HTTP request to OPA server
-            response = requests.post(
-                f"{self.opa_url}/v1/data/zta/allow",  # CHANGED: Use correct endpoint
-                json={"input": opa_input},
-                headers={
-                    "Content-Type": "application/json",
-                    "X-Service-Token": self.gateway_service_token,
-                    "X-Request-ID": request_id,
-                },
-                timeout=5,
-            )
-
-            # Log REAL OPA communication
-            zta_logger.log_event(
-                "REAL_OPA_QUERY_SENT",
-                {
-                    "from": "gateway_server",
-                    "to": "opa_server",
-                    "request_id": request_id,
-                    "opa_url": self.opa_url,
-                    "status_code": response.status_code,
-                },
-                user_id=user_claims.get("sub"),
-                request_id=request_id,
-            )
-
-            if response.status_code == 200:
-                result = response.json().get("result", {})
-                logger.info(
-                    f"[{request_id}] OPA Decision: {result.get('allow', False)}"
-                )
-                return result
-            else:
-                logger.error(
-                    f"[{request_id}] OPA request failed: {response.status_code}"
-                )
-                # Fallback for OPA failure
-                return {"allow": True, "reason": "OPA unavailable - fail open"}
-
-        except Exception as e:
-            logger.error(f"[{request_id}] OPA communication failed: {e}")
-            # Fallback: allow access if OPA is down (for demo)
-            return {"allow": True, "reason": f"OPA error: {str(e)} - fail open"}
-
-    def forward_to_api_server(
-        self, flask_request, user_claims, opa_decision, request_id
-    ):
-        """
-        Gateway → API Server: REAL HTTP call to API server
-        Returns: requests.Response object
-        """
-        try:
-            # Build headers with service tokens and user claims
-            headers = self._build_api_headers(user_claims, opa_decision, request_id)
-
-            # Extract request data
-            method = flask_request.method
-            url = f"{self.api_server_url}{flask_request.path}"
-
-            # Handle different HTTP methods
-            if method in ["POST", "PUT", "PATCH"]:
-                data = flask_request.get_json(silent=True) or {}
-                # REAL HTTP request with data
-                response = requests.request(
-                    method=method, url=url, json=data, headers=headers, timeout=10
-                )
-            else:
-                # GET, DELETE, etc.
-                response = requests.request(
-                    method=method, url=url, headers=headers, timeout=10
-                )
-
-            # Log REAL API communication
-            zta_logger.log_event(
-                "REAL_API_REQUEST_SENT",
-                {
-                    "from": "gateway_server",
-                    "to": "api_server",
-                    "request_id": request_id,
-                    "api_url": url,
-                    "method": method,
-                    "status_code": response.status_code,
-                },
-                user_id=user_claims.get("sub"),
-                request_id=request_id,
-            )
-
-            return response
-
-        except Exception as e:
-            logger.error(f"[{request_id}] API Server communication failed: {e}")
-
-            # Log error
-            zta_logger.log_event(
-                "API_COMMUNICATION_ERROR",
-                {
-                    "error": str(e),
-                    "request_id": request_id,
-                    "api_url": self.api_server_url,
-                },
-                request_id=request_id,
-            )
-
-            # Return error response
-            return self._create_error_response(500, f"API Server unavailable: {str(e)}")
-
-    def process_gateway_request(self, flask_request, user_claims):
-        """
-        Complete REAL flow for gateway server:
-        Gateway (auth) → OPA → API Server → Gateway → User
+        NEW ENCRYPTED WORKFLOW:
+        User → Gateway → (Encrypted) → OPA Agent → OPA Server → API Server → (Encrypted) → Gateway → User
         """
         request_id = str(uuid.uuid4())
-        g.request_id = request_id  # Store in Flask's g
+        g.request_id = request_id
 
-        logger.info(f"[{request_id}] === REAL ZTA FLOW START ===")
+        logger.info(f"[{request_id}] === ENCRYPTED ZTA FLOW START ===")
         logger.info(f"[{request_id}] User: {user_claims.get('username')}")
         logger.info(f"[{request_id}] Endpoint: {flask_request.path}")
 
         try:
-            # Step 1: Query OPA for policy decision
-            request_info = {
-                "path": flask_request.path,
-                "method": flask_request.method,
-                "resource_type": self._extract_resource_type(flask_request.path),
-            }
-
-            opa_decision = self.query_opa_for_decision(
-                user_claims, request_info, request_id
-            )
-
-            if not opa_decision.get("allow", False):
-                logger.info(f"[{request_id}] OPA denied access")
-                return self._create_denied_response(opa_decision, request_id)
-
-            # Step 2: Forward to API Server
-            api_response = self.forward_to_api_server(
-                flask_request, user_claims, opa_decision, request_id
-            )
-
-            # Step 3: Process API response
-            if api_response.status_code >= 400:
-                logger.warning(
-                    f"[{request_id}] API returned error: {api_response.status_code}"
+            # Step 1: Get user's public key
+            user_public_key = self._get_user_public_key(user_claims.get("sub"))
+            if not user_public_key:
+                return self._create_error_response(
+                    400,
+                    "User public key not found. Please complete registration.",
+                    request_id,
                 )
 
-            # Convert API response to Flask response
-            return self._convert_to_flask_response(api_response)
+            # Step 2: Prepare request data
+            request_data = self._build_request_data(
+                flask_request, user_claims, request_id
+            )
+
+            # Step 3: Check if OPA Agent is available
+            if not self.opa_agent_client:
+                return self._create_error_response(
+                    503, "OPA Agent service unavailable", request_id
+                )
+
+            # Step 4: Encrypt and send to OPA Agent
+            try:
+                encrypted_request = self.opa_agent_client.encrypt_for_agent(
+                    request_data
+                )
+
+                agent_response = self.opa_agent_client.send_to_agent(
+                    encrypted_request, user_public_key, request_id
+                )
+
+                if not agent_response:
+                    return self._create_error_response(
+                        503, "OPA Agent did not respond", request_id
+                    )
+
+                # Step 5: Extract encrypted response
+                encrypted_response = agent_response.get("encrypted_response")
+                if not encrypted_response:
+                    return self._create_error_response(
+                        500, "No encrypted response from OPA Agent", request_id
+                    )
+
+                # Step 6: Return encrypted response to client
+                # (Client will decrypt with their private key)
+                logger.info(f"[{request_id}] Returning encrypted response to user")
+
+                return (
+                    jsonify(
+                        {
+                            "status": "success",
+                            "encrypted_payload": encrypted_response,
+                            "encryption_info": {
+                                "algorithm": "RSA-OAEP-SHA256",
+                                "key_size": 2048,
+                                "format": "base64",
+                                "request_id": request_id,
+                            },
+                            "zta_context": {
+                                "flow": "User → Gateway → OPA Agent → OPA Server → API Server → Gateway → User",
+                                "request_id": request_id,
+                                "encryption_used": True,
+                            },
+                        }
+                    ),
+                    200,
+                )
+
+            except Exception as e:
+                logger.error(f"[{request_id}] OPA Agent communication error: {e}")
+                return self._create_error_response(
+                    500, f"OPA Agent error: {str(e)}", request_id
+                )
 
         except Exception as e:
-            logger.error(f"[{request_id}] ZTA flow error: {e}")
-
-            zta_logger.log_event(
-                "ZTA_FLOW_ERROR",
-                {
-                    "error": str(e),
-                    "request_id": request_id,
-                    "flow_step": "gateway_processing",
-                },
-                request_id=request_id,
-            )
-
+            logger.error(f"[{request_id}] Encrypted flow error: {e}")
             return self._create_error_response(
-                500, f"Gateway processing error: {str(e)}"
+                500, f"Encrypted processing error: {str(e)}", request_id
             )
         finally:
-            logger.info(f"[{request_id}] === REAL ZTA FLOW END ===")
+            logger.info(f"[{request_id}] === ENCRYPTED ZTA FLOW END ===")
 
-    def _build_opa_input(self, user_claims, request_info, request_id):
-        """Build OPA input for REAL policy evaluation"""
+    def _get_user_public_key(self, user_id):
+        """Get user's public key from database or key storage"""
+        try:
+            # Try to get from database first
+            from app.api_models import User
+
+            user = User.query.get(user_id)
+            if user and user.public_key:
+                logger.debug(f"Found public key in database for user {user_id}")
+                return user.public_key
+
+            # Try to get from key storage
+            try:
+                from app.mTLS.cert_manager import cert_manager
+
+                key = cert_manager.get_user_public_key(user_id)
+                if key:
+                    logger.debug(f"Found public key in key storage for user {user_id}")
+                    return key
+            except:
+                pass
+
+            logger.warning(f"No public key found for user {user_id}")
+            return None
+
+        except Exception as e:
+            logger.error(f"Failed to get user public key: {e}")
+            return None
+
+    def _build_request_data(self, flask_request, user_claims, request_id):
+        """Build request data for OPA Agent"""
+        # Extract resource type from path
+        resource_type = (
+            "document"
+            if "/documents" in flask_request.path
+            else (
+                "user"
+                if "/users" in flask_request.path
+                else "log" if "/logs" in flask_request.path else "unknown"
+            )
+        )
+
+        # Get request body if present
+        request_body = None
+        if flask_request.method in ["POST", "PUT", "PATCH"]:
+            try:
+                request_body = flask_request.get_json(silent=True)
+            except:
+                pass
+
         return {
             "user": {
                 "id": user_claims.get("sub"),
@@ -234,97 +200,43 @@ class RealServiceCommunicator:
                 "email": user_claims.get("email"),
             },
             "resource": {
-                "type": request_info.get("resource_type", "unknown"),
-                "path": request_info.get("path"),
-                "method": request_info.get("method"),
+                "type": resource_type,
+                "path": flask_request.path,
+                "method": flask_request.method,
+                "query_params": dict(flask_request.args),
             },
-            "action": request_info.get("method", "read").lower(),
-            "environment": {
-                "time": {
-                    "hour": datetime.now().hour,
-                    "weekday": datetime.now().strftime("%A"),
-                    "weekend": datetime.now().weekday() >= 5,
-                    "timestamp": datetime.now().isoformat(),
+            "request": {
+                "body": request_body,
+                "headers": {
+                    k: v
+                    for k, v in flask_request.headers.items()
+                    if k.lower() not in ["authorization", "cookie"]
                 },
-                "ip_address": request.remote_addr if request else None,
             },
+            "environment": {
+                "timestamp": datetime.now().isoformat(),
+                "client_ip": flask_request.remote_addr,
+                "user_agent": (
+                    flask_request.user_agent.string
+                    if flask_request.user_agent
+                    else None
+                ),
+            },
+            "action": flask_request.method.lower(),
+            "needs_api_call": True,
             "request_id": request_id,
-            "authentication": {
-                "method": user_claims.get("auth_method", "JWT"),
-                "source": "gateway_server",
-            },
         }
 
-    def _build_api_headers(self, user_claims, opa_decision, request_id):
-        """Build headers for API server request"""
-        headers = {
-            "Content-Type": "application/json",
-            "X-Service-Token": self.api_service_token,  # REAL service token
-            "X-Gateway-Token": self.gateway_service_token,
-            "X-Request-ID": request_id,
-            "X-User-Claims": json.dumps(user_claims),  # Send user claims
-            "X-OPA-Decision": json.dumps(opa_decision),  # Send OPA decision
-            "X-Forwarded-For": request.remote_addr if request else "unknown",
-            "X-Forwarded-Host": request.host if request else "unknown",
-        }
-
-        # Preserve client certificate if present (for mTLS)
-        if hasattr(g, "client_certificate"):
-            cert_info = g.client_certificate
-            headers["X-Client-Certificate-Info"] = json.dumps(
-                {
-                    "fingerprint": cert_info.get("fingerprint", "")[:16] + "...",
-                    "email": cert_info.get("subject", {}).get("emailAddress"),
-                }
-            )
-
-        return headers
-
-    def _extract_resource_type(self, path):
-        """Extract resource type from URL path"""
-        if "/documents" in path:
-            return "document"
-        elif "/users" in path:
-            return "user"
-        elif "/logs" in path:
-            return "log"
-        else:
-            return "unknown"
-
-    def _convert_to_flask_response(self, requests_response):
-        """Convert requests.Response to Flask response"""
-        from flask import Response
-
-        # Get content
-        try:
-            content = requests_response.json()
-        except:
-            content = requests_response.text
-
-        # Create Flask response
-        response = Response(
-            response=json.dumps(content) if isinstance(content, dict) else content,
-            status=requests_response.status_code,
-            mimetype="application/json",
-        )
-
-        # Copy relevant headers
-        for key, value in requests_response.headers.items():
-            if key.lower() not in ["server", "date", "connection"]:
-                response.headers[key] = value
-
-        return response
-
-    def _create_denied_response(self, opa_decision, request_id):
-        """Create response for denied access"""
-        from flask import jsonify
-
+    def _create_error_response(self, status_code, message, request_id):
+        """Create error response"""
+        # Log error event
         zta_logger.log_event(
-            "ACCESS_DENIED_BY_OPA",
+            "ENCRYPTED_FLOW_ERROR",
             {
+                "error": message,
                 "request_id": request_id,
-                "opa_reason": opa_decision.get("reason", "Policy violation"),
-                "opa_allow": opa_decision.get("allow", False),
+                "status_code": status_code,
+                "flow_step": "service_communicator",
             },
             request_id=request_id,
         )
@@ -332,30 +244,12 @@ class RealServiceCommunicator:
         return (
             jsonify(
                 {
-                    "error": "Access denied",
-                    "reason": opa_decision.get("reason", "Policy violation"),
-                    "zta_context": {
-                        "denied_by": "OPA_policy",
-                        "request_id": request_id,
-                        "flow": "User → Gateway → OPA → [DENIED]",
-                    },
-                }
-            ),
-            403,
-        )
-
-    def _create_error_response(self, status_code, message):
-        """Create error response"""
-        from flask import jsonify
-
-        return (
-            jsonify(
-                {
-                    "error": "Service communication failed",
+                    "error": "Encrypted workflow failed",
                     "message": message,
                     "zta_context": {
                         "failed_component": "service_communicator",
-                        "request_id": getattr(g, "request_id", "unknown"),
+                        "request_id": request_id,
+                        "flow_interrupted": True,
                     },
                 }
             ),
@@ -363,26 +257,37 @@ class RealServiceCommunicator:
         )
 
     def health_check(self):
-        """Check health of all services"""
+        """Check health of all services in encrypted workflow"""
         health_status = {
             "gateway": "running",
-            "opa": "unknown",
+            "opa_agent": "unknown",
             "api_server": "unknown",
             "timestamp": datetime.now().isoformat(),
         }
 
-        # Check OPA
-        try:
-            opa_response = requests.get(f"{self.opa_url}/health", timeout=3)
-            health_status["opa"] = (
-                "healthy" if opa_response.status_code == 200 else "unhealthy"
+        # Check OPA Agent
+        if self.opa_agent_client:
+            health_status["opa_agent"] = (
+                "healthy" if self.opa_agent_client.health_check() else "unhealthy"
             )
-        except:
-            health_status["opa"] = "unreachable"
+        else:
+            health_status["opa_agent"] = "not_initialized"
 
         # Check API Server
         try:
-            api_response = requests.get(f"{self.api_server_url}/health", timeout=3)
+            # Use direct service token for health check
+            headers = {
+                "X-Service-Token": current_app.config.get(
+                    "GATEWAY_SERVICE_TOKEN", "gateway-token-2024"
+                ),
+                "X-Request-ID": str(uuid.uuid4())[:8],
+            }
+            api_response = requests.get(
+                f"{self.api_server_url}/health",
+                headers=headers,
+                timeout=3,
+                verify=False,
+            )  # For self-signed certs
             health_status["api_server"] = (
                 "healthy" if api_response.status_code == 200 else "unhealthy"
             )
@@ -391,58 +296,31 @@ class RealServiceCommunicator:
 
         return health_status
 
-    def send_direct_to_api(self, endpoint, method="GET", data=None, user_claims=None):
-        """
-        Direct API call for internal use (bypassing OPA)
-        Useful for service-to-service calls within the system
-        """
-        headers = {
-            "Content-Type": "application/json",
-            "X-Service-Token": self.api_service_token,
-            "X-Internal-Call": "true",
-        }
 
-        if user_claims:
-            headers["X-User-Claims"] = json.dumps(user_claims)
-
-        url = f"{self.api_server_url}{endpoint}"
-
-        try:
-            if method in ["POST", "PUT", "PATCH"]:
-                response = requests.request(
-                    method, url, json=data, headers=headers, timeout=10
-                )
-            else:
-                response = requests.request(method, url, headers=headers, timeout=10)
-
-            return response
-        except Exception as e:
-            logger.error(f"Direct API call failed: {e}")
-            return None
-
-
-real_service_communicator = RealServiceCommunicator()
+# Singleton instance
+encrypted_service_communicator = EncryptedServiceCommunicator()
 
 
 def init_service_communicator(app):
-    """Initialize REAL service communicator"""
-    real_service_communicator.init_app(app)
+    """Initialize ENCRYPTED service communicator"""
+    encrypted_service_communicator.init_app(app)
 
 
 def get_service_communicator():
-    """Get REAL service communicator instance"""
-    return real_service_communicator
+    """Get ENCRYPTED service communicator instance"""
+    return encrypted_service_communicator
 
 
-def process_gateway_request(request, user_claims):
+def process_encrypted_request(request, user_claims):
     """
     Simple wrapper for gateway server to use
-    Example usage in gateway_server.py:
 
+    Usage in gateway routes:
     @app.route('/api/documents')
+    @require_authentication
     def get_documents():
-        user_claims = get_user_claims()  # From auth
-        return process_gateway_request(request, user_claims)
+        user_claims = get_jwt_claims()  # From auth
+        return process_encrypted_request(request, user_claims)
     """
     communicator = get_service_communicator()
-    return communicator.process_gateway_request(request, user_claims)
+    return communicator.process_encrypted_request(request, user_claims)
