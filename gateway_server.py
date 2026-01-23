@@ -1,3 +1,4 @@
+# gateway_server.py - FIXED VERSION
 """
 ZTA Gateway Server - Handles client authentication (mTLS + JWT)
 Forwards authorized requests to API server
@@ -17,15 +18,6 @@ from app.gateway_app import create_gateway_app
 
 app = create_gateway_app()
 
-if __name__ == "__main__":
-    print("=" * 60)
-    print("ZTA GATEWAY SERVER")
-    print("=" * 60)
-    print("Port: 5000")
-    print("Authentication: mTLS + JWT")
-    print("=" * 60)
-
-    app.run(debug=True, port=5000, ssl_context=("certs/server.crt", "certs/server.key"))
 # Import real service communicator
 from app.services.service_communicator import process_gateway_request
 
@@ -157,22 +149,13 @@ if __name__ == "__main__":
     print("=" * 60)
     print("ZTA GATEWAY SERVER")
     print("=" * 60)
-    print(f"Port: {app.config['GATEWAY_SERVER_PORT']}")
-    print(f"Forwarding to API: {app.config['API_SERVER_URL']}")
-    print(f"OPA Server: {app.config['OPA_SERVER_URL']}")
+    print(f"Port: 5000")
     print("Authentication: mTLS + JWT")
     print("=" * 60)
 
-    import ssl
-
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    context.load_cert_chain(
-        certfile=app.config["SERVER_CERT_PATH"], keyfile=app.config["SERVER_KEY_PATH"]
-    )
-
     app.run(
         debug=True,
-        port=app.config["GATEWAY_SERVER_PORT"],
-        ssl_context=context,
-        host="0.0.0.0",
+        port=5000,
+        ssl_context=("certs/server.crt", "certs/server.key"),
+        use_reloader=False,  # Add this to prevent socket issues
     )
