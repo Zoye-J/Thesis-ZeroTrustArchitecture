@@ -10,52 +10,56 @@ class Config:
         "DATABASE_URL", "sqlite:///government_zta.db"
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    # JWT
+
+    # JWT (Only for Gateway Server)
     JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "jwt-government-secure-key-2024")
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=8)
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=30)
 
-    # OPA Configuration
-    OPA_URL = os.environ.get("OPA_URL", "http://localhost:8181")
+    # ============ DISTRIBUTED SERVER PORTS ============
+    API_SERVER_PORT = int(os.environ.get("API_SERVER_PORT", 5001))
+    GATEWAY_SERVER_PORT = int(os.environ.get("GATEWAY_SERVER_PORT", 8443))
+    OPA_SERVER_PORT = int(os.environ.get("OPA_SERVER_PORT", 8181))
+
+    # ============ SERVICE COMMUNICATION URLs ============
+    OPA_SERVER_URL = os.environ.get("OPA_SERVER_URL", "http://localhost:8181")
+    API_SERVER_URL = os.environ.get("API_SERVER_URL", "http://localhost:5001")
+    GATEWAY_SERVER_URL = os.environ.get("GATEWAY_SERVER_URL", "https://localhost:8443")
+
+    # Timeouts
     OPA_TIMEOUT = int(os.environ.get("OPA_TIMEOUT", 5))
-
-    # SERVICE COMMUNICATION
-    API_SERVER_URL = os.environ.get("API_SERVER_URL", "http://localhost:5000")
-
-    # Service tokens for communication between services
-    SERVICE_TOKEN = os.environ.get("SERVICE_TOKEN", "server1-service-token-2024-zta")
-    OPA_SERVICE_TOKEN = os.environ.get("OPA_SERVICE_TOKEN", "opa-agent-token-2024-zta")
-
-    # Service roles
-    SERVER1_ROLE = "server1"
-    OPA_AGENT_ROLE = "opa_agent"
-    API_SERVER_ROLE = "api_server"
-
-    # Service communication timeout
     SERVICE_TIMEOUT = int(os.environ.get("SERVICE_TIMEOUT", 10))
 
-    # Service-to-service mTLS settings
+    # ============ SERVICE TOKENS ============
+    SERVICE_TOKENS = {
+        "gateway": os.environ.get("GATEWAY_SERVICE_TOKEN", "gateway-token-2024-zta"),
+        "api": os.environ.get("API_SERVICE_TOKEN", "api-token-2024-zta"),
+        "opa": os.environ.get("OPA_SERVICE_TOKEN", "opa-token-2024-zta"),
+    }
+
+    # Individual token access (for convenience)
+    GATEWAY_SERVICE_TOKEN = SERVICE_TOKENS["gateway"]
+    API_SERVICE_TOKEN = SERVICE_TOKENS["api"]
+    OPA_SERVICE_TOKEN = SERVICE_TOKENS["opa"]
+
+    # ============ SERVICE COMMUNICATION SETTINGS ============
     SERVICE_MTLS_ENABLED = (
-        os.environ.get("SERVICE_MTLS_ENABLED", "true").lower() == "true"
+        os.environ.get("SERVICE_MTLS_ENABLED", "false").lower() == "true"
     )
     SERVICE_CERT_DIR = os.environ.get("SERVICE_CERT_DIR", "./certs/services")
 
-    # Service communication headers
-    SERVICE_HEADERS = {
-        "X-Service-Role": SERVER1_ROLE,
-        "X-Service-Token": SERVICE_TOKEN,
-        "X-Request-Source": "server1",
-        "Content-Type": "application/json",
-    }
+    # Retry settings for service communication
+    SERVICE_RETRY_ATTEMPTS = int(os.environ.get("SERVICE_RETRY_ATTEMPTS", 3))
+    SERVICE_RETRY_DELAY = int(os.environ.get("SERVICE_RETRY_DELAY", 1))
 
-    # mTLS Configuration
+    # ============ mTLS CONFIGURATION (For Gateway) ============
     SSL_CERT_PATH = os.environ.get("SSL_CERT_PATH", "./certs")
     MTLS_ENABLED = False  # Default to False, enable in production
     CA_CERT_PATH = os.path.join(SSL_CERT_PATH, "ca.crt")
     SERVER_CERT_PATH = os.path.join(SSL_CERT_PATH, "server.crt")
     SERVER_KEY_PATH = os.path.join(SSL_CERT_PATH, "server.key")
 
-    # Security headers for mTLS
+    # ============ SECURITY HEADERS ============
     SECURITY_HEADERS = {
         "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
         "Content-Security-Policy": "default-src 'self'",
@@ -63,13 +67,32 @@ class Config:
         "X-Frame-Options": "DENY",
     }
 
-    # Logging
+    # ============ LOGGING ============
     LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
+    LOG_FORMAT = os.environ.get(
+        "LOG_FORMAT",
+        "%(asctime)s - %(name)s - %(levelname)s - [%(server)s] - %(message)s",
+    )
+
+    # ============ DISTRIBUTED TRACING ============
+    TRACING_ENABLED = os.environ.get("TRACING_ENABLED", "true").lower() == "true"
+    TRACE_HEADER_NAME = os.environ.get("TRACE_HEADER_NAME", "X-Request-ID")
+
+    # ============ HEALTH CHECK SETTINGS ============
+    HEALTH_CHECK_INTERVAL = int(os.environ.get("HEALTH_CHECK_INTERVAL", 30))
+    HEALTH_CHECK_TIMEOUT = int(os.environ.get("HEALTH_CHECK_TIMEOUT", 5))
+
+    # ============ RATE LIMITING (Gateway Only) ============
+    RATE_LIMIT_ENABLED = os.environ.get("RATE_LIMIT_ENABLED", "false").lower() == "true"
+    RATE_LIMIT_REQUESTS = int(os.environ.get("RATE_LIMIT_REQUESTS", 100))
+    RATE_LIMIT_PERIOD = int(os.environ.get("RATE_LIMIT_PERIOD", 60))  # seconds
 
 
 class DevelopmentConfig(Config):
     DEBUG = True
     MTLS_ENABLED = False  # Disable mTLS in development for easier testing
+    LOG_LEVEL = "DEBUG"
+    TRACING_ENABLED = True
 
 
 class ProductionConfig(Config):
@@ -77,12 +100,17 @@ class ProductionConfig(Config):
     MTLS_ENABLED = True  # Enable mTLS in production
     JWT_COOKIE_SECURE = True
     JWT_COOKIE_SAMESITE = "Strict"
+    LOG_LEVEL = "WARNING"
+    SERVICE_MTLS_ENABLED = True  # Enable mTLS between services in production
+    RATE_LIMIT_ENABLED = True
 
 
 class TestingConfig(Config):
     TESTING = True
     SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
     MTLS_ENABLED = False
+    SERVICE_MTLS_ENABLED = False
+    LOG_LEVEL = "DEBUG"
 
 
 config_dict = {

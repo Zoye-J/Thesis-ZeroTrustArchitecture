@@ -1,7 +1,6 @@
-from app import db
+from app.api_models import db
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
-
 
 
 class User(db.Model):

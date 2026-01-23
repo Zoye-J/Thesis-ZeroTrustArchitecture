@@ -238,7 +238,7 @@ user_management := {"allow": true, "reason": "Admin can manage users in their fa
             path_parts = self.path.split("/")
             policy_id = path_parts[-1] if len(path_parts) >= 4 else "unknown"
 
-            content_length = int(self.headers["Content-Type"])
+            content_length = int(self.headers["Content-Length"])  # FIXED LINE 265
             policy_content = self.rfile.read(content_length).decode("utf-8")
 
             # Parse package name from content

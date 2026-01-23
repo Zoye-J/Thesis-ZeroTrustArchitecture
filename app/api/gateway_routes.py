@@ -1,3 +1,8 @@
+"""
+Gateway-specific API routes
+These are lightweight endpoints that run on the Gateway server
+"""
+
 from flask import Blueprint, request, jsonify, current_app, g
 from app.mTLS.middleware import require_authentication, require_mtls
 from app.logs.zta_event_logger import zta_logger, EVENT_TYPES
@@ -6,13 +11,64 @@ import uuid
 import hashlib
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
-from app import db
+import requests
 
-api_bp = Blueprint("api", __name__)
+gateway_bp = Blueprint("gateway", __name__)
 
 
-# KEEP: Simple ZTA test endpoint (for gateway)
-@api_bp.route("/zta-test", methods=["GET"])
+@gateway_bp.route("/fter/", methods=["POST"])
+@gateway_bp.route("/register", methods=["POST"])
+def handle_registration():
+    """Handle registration by forwarding to API Server"""
+    print(f"\n🔀 Registration request received at Gateway")
+
+    try:
+        data = request.get_json()
+        print(f"Registration data: {data}")
+
+        # Get API Server URL from config
+        api_server_url = current_app.config.get(
+            "API_SERVER_URL", "https://localhost:5001"
+        )
+        print(f"Forwarding to: {api_server_url}/api/register/")
+
+        # Forward to API Server
+        response = requests.post(
+            f"{api_server_url}/api/register/",
+            json=data,
+            headers={
+                "Content-Type": "application/json",
+                "X-Service-Token": current_app.config.get(
+                    "GATEWAY_SERVICE_TOKEN", "gateway-token-2024"
+                ),
+                "X-Request-ID": str(uuid.uuid4()),
+            },
+            timeout=10,
+            verify=False,  # Important: Disable SSL verification for self-signed certs
+        )
+
+        print(f"API Server response status: {response.status_code}")
+
+        # Return the API Server's response
+        return jsonify(response.json()), response.status_code
+
+    except requests.exceptions.RequestException as e:
+        print(f"❌ API Server connection error: {e}")
+        return (
+            jsonify(
+                {
+                    "error": "Registration service unavailable",
+                    "message": "Cannot connect to registration server",
+                }
+            ),
+            503,
+        )
+    except Exception as e:
+        print(f"❌ Registration error: {e}")
+        return jsonify({"error": "Registration failed", "message": str(e)}), 500
+
+
+@gateway_bp.route("/zta-test", methods=["GET"])
 def simple_zta_test():
     """
     Simple ZTA test endpoint - no authentication required
@@ -100,138 +156,64 @@ def simple_zta_test():
                 "status": "info",
                 "message": "No client certificate provided",
                 "certificate": {"present": False},
-                "hint": "Connect with: curl --cert ./certs/clients/1/client.crt --key ./certs/clients/1/client.key --cacert ./certs/ca.crt https://localhost:8443/api/zta-test",
+                "hint": "Connect with mTLS certificate to test",
             }
         ),
         200,
     )
 
 
-# KEEP: Test authentication endpoint (for gateway)
-@api_bp.route("/zta/test", methods=["GET"])
+@gateway_bp.route("/zta/test", methods=["GET"])
 @require_authentication
 def test_zta_auth():
     """Test Zero Trust Authentication (JWT + mTLS) - Gateway test"""
     try:
         request_id = getattr(g, "request_id", str(uuid.uuid4()))
-
-        # Get auth method from g object (set by middleware)
         auth_method = getattr(g, "auth_method", "unknown")
-        user_id = getattr(g, "jwt_identity", None)
 
         if auth_method == "mtls":
             cert_info = getattr(g, "client_certificate", {})
-            email = cert_info.get("subject", {}).get("emailAddress", "Unknown")
-
             return (
                 jsonify(
                     {
                         "status": "success",
-                        "message": "Zero Trust Authentication successful",
-                        "authentication_layers": {
-                            "layer1_mtls": "✓ Client certificate validated",
-                            "layer2_jwt": "✗ JWT token not required (mTLS only)",
-                        },
+                        "message": "mTLS authentication successful",
+                        "auth_method": "mTLS",
                         "certificate_info": {
                             "fingerprint": cert_info.get("fingerprint", "")[:16]
                             + "...",
                             "subject": cert_info.get("subject", {}),
                         },
-                        "auth_method": "mTLS",
-                        "timestamp": datetime.utcnow().isoformat(),
                     }
                 ),
                 200,
             )
-
         elif auth_method == "jwt":
             return (
                 jsonify(
                     {
                         "status": "success",
-                        "message": "JWT Authentication successful",
-                        "authentication_layers": {
-                            "layer1_mtls": "✗ Client certificate not present",
-                            "layer2_jwt": "✓ JWT token validated",
-                        },
+                        "message": "JWT authentication successful",
                         "auth_method": "JWT",
-                        "timestamp": datetime.utcnow().isoformat(),
                     }
                 ),
                 200,
             )
-
         else:
-            return jsonify({"error": "Authentication required"}), 401
+            return jsonify({"error": "Authentication failed"}), 401
 
     except Exception as e:
-        zta_logger.log_event(
-            "ZTA_TEST_ERROR",
-            {"error": str(e), "test_endpoint": True},
-            request_id=getattr(g, "request_id", str(uuid.uuid4())),
-        )
         return jsonify({"error": "ZTA test failed", "message": str(e)}), 500
 
 
-# KEEP: Service health endpoint (for gateway)
-@api_bp.route("/service/health", methods=["GET"])
-@require_mtls  # Services only need mTLS
+@gateway_bp.route("/service/health", methods=["GET"])
+@require_mtls
 def service_health():
     """Service health check - mTLS only (service-to-service)"""
-    request_id = str(uuid.uuid4())
-    auth_method = getattr(g, "auth_method", "unknown")
-
     return jsonify(
         {
             "status": "healthy",
             "service": "ZTA Gateway Server",
-            "auth_method": auth_method,
             "timestamp": datetime.utcnow().isoformat(),
-            "zta_enabled": True,
-            "features": ["JWT", "mTLS", "OPA", "Certificate Validation", "RBAC"],
-            "access_restriction": "mTLS certificate required for services",
-            "request_id": request_id,
         }
     )
-
-
-# KEEP: Certificate verification logging endpoint (for gateway)
-@api_bp.route("/certificate/verify", methods=["POST"])
-@require_mtls  # Requires mTLS certificate
-def verify_certificate():
-    """Endpoint to verify and log certificate details (gateway functionality)"""
-    try:
-        request_id = getattr(g, "request_id", str(uuid.uuid4()))
-
-        # Get certificate from g object
-        if not hasattr(g, "client_certificate"):
-            return jsonify({"error": "No certificate provided"}), 400
-
-        cert_info = g.client_certificate
-
-        return (
-            jsonify(
-                {
-                    "status": "success",
-                    "certificate_valid": True,
-                    "certificate_details": cert_info,
-                    "zta_context": {
-                        "verification_method": "mTLS_certificate",
-                        "request_id": request_id,
-                        "timestamp": datetime.utcnow().isoformat(),
-                    },
-                }
-            ),
-            200,
-        )
-
-    except Exception as e:
-        zta_logger.log_event(
-            "CERTIFICATE_VERIFICATION_ERROR",
-            {"error": str(e), "client_ip": request.remote_addr},
-            request_id=getattr(g, "request_id", str(uuid.uuid4())),
-        )
-        return (
-            jsonify({"error": "Certificate verification failed", "message": str(e)}),
-            500,
-        )
