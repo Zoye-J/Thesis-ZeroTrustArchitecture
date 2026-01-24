@@ -10,6 +10,19 @@ import sys
 import os
 import re
 from datetime import datetime
+import ssl
+import sys
+import os
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+try:
+    from app.logs.zta_event_logger import event_logger, EventType, Severity
+
+    HAS_LOGGING = True
+except ImportError as e:
+    print(f"⚠️ Event logging disabled: {e}")
+    HAS_LOGGING = False
 
 
 class PythonOPAHandler(BaseHTTPRequestHandler):
@@ -206,6 +219,9 @@ user_management := {"allow": true, "reason": "Admin can manage users in their fa
             post_data = self.rfile.read(content_length)
             input_data = json.loads(post_data)
 
+            # Extract trace ID if available
+            trace_id = input_data.get("input", {}).get("trace_id", "unknown")
+
             # Extract policy path from URL
             path_parts = self.path.split("/")
             if len(path_parts) >= 4:
@@ -213,11 +229,53 @@ user_management := {"allow": true, "reason": "Admin can manage users in their fa
             else:
                 policy_path = "zta/allow"
 
+            # LOG REQUEST RECEIVED
+            if HAS_LOGGING:
+                try:
+                    user_info = input_data.get("input", {}).get("user", {})
+                    event_logger.log_event(
+                        event_type=EventType.OPA_REQUEST_SENT,
+                        source_component="opa_server",
+                        action=f"Policy evaluation request received",
+                        user_id=user_info.get("id"),
+                        username=user_info.get("username"),
+                        trace_id=trace_id,
+                        details={
+                            "policy_path": policy_path,
+                            "method": self.command,
+                            "headers": dict(self.headers),
+                        },
+                        severity=Severity.INFO,
+                    )
+                except Exception as e:
+                    print(f"⚠️ Failed to log OPA request: {e}")
+
             print(f"🔍 Evaluating policy: {policy_path}")
             print(f"📥 Input: {json.dumps(input_data, indent=2)}")
 
             # Evaluate policy
             result = self.evaluate_policy(policy_path, input_data.get("input", {}))
+
+            # LOG RESPONSE SENT
+            if HAS_LOGGING:
+                try:
+                    allowed = result.get("decision", {}).get("allowed", False)
+                    user_info = input_data.get("input", {}).get("user", {})
+                    event_logger.log_event(
+                        event_type=EventType.OPA_RESPONSE_RECEIVED,
+                        source_component="opa_server",
+                        action=f"Policy response sent: {'ALLOW' if allowed else 'DENY'}",
+                        user_id=user_info.get("id"),
+                        username=user_info.get("username"),
+                        trace_id=trace_id,
+                        details={
+                            "decision": result.get("decision", {}),
+                            "policy_path": policy_path,
+                        },
+                        severity=Severity.INFO,
+                    )
+                except Exception as e:
+                    print(f"⚠️ Failed to log OPA response: {e}")
 
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -277,6 +335,33 @@ user_management := {"allow": true, "reason": "Admin can manage users in their fa
 
         print(f"📊 Package: {package}, Type: {policy_type}")
 
+        # LOG THE START OF POLICY EVALUATION
+        if HAS_LOGGING:
+            try:
+                # Get user info for logging
+                user_info = input_data.get("user", {})
+                trace_id = input_data.get("trace_id", "unknown")
+
+                event_logger.log_event(
+                    event_type=EventType.POLICY_EVALUATION,
+                    source_component="opa_server",
+                    action=f"Policy evaluation started",
+                    user_id=user_info.get("id"),
+                    username=user_info.get("username"),
+                    trace_id=trace_id,
+                    details={
+                        "policy_path": policy_path,
+                        "user_role": user_info.get("role", "unknown"),
+                        "action": input_data.get("action", "unknown"),
+                        "resource_type": input_data.get("resource", {}).get(
+                            "type", "unknown"
+                        ),
+                    },
+                    severity=Severity.INFO,
+                )
+            except Exception as e:
+                print(f"⚠️ Failed to log policy start: {e}")
+
         # Extract user and resource info
         user = input_data.get("user", {})
         resource = input_data.get("resource", {})
@@ -300,6 +385,34 @@ user_management := {"allow": true, "reason": "Admin can manage users in their fa
             "timestamp": time.time(),
             "policy_path": policy_path,
         }
+
+        # LOG THE POLICY DECISION
+        if HAS_LOGGING:
+            try:
+                allowed = result.get("result", False)
+                user_info = input_data.get("user", {})
+                trace_id = input_data.get("trace_id", "unknown")
+
+                event_logger.log_event(
+                    event_type=(
+                        EventType.POLICY_ALLOW if allowed else EventType.POLICY_DENY
+                    ),
+                    source_component="opa_server",
+                    action=f"Policy decision: {'ALLOW' if allowed else 'DENY'}",
+                    user_id=user_info.get("id"),
+                    username=user_info.get("username"),
+                    trace_id=trace_id,
+                    details={
+                        "policy_path": policy_path,
+                        "decision": result,
+                        "user_role": user_info.get("role", "unknown"),
+                        "resource": input_data.get("resource", {}),
+                        "action": input_data.get("action", "unknown"),
+                    },
+                    severity=Severity.HIGH if allowed else Severity.MEDIUM,
+                )
+            except Exception as e:
+                print(f"⚠️ Failed to log policy decision: {e}")
 
         return result
 
@@ -438,6 +551,23 @@ def start_python_opa_server(port=8181):
     server_address = ("", port)
     httpd = HTTPServer(server_address, PythonOPAHandler)
 
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain("certs/server.crt", "certs/server.key")
+    httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
+
+    # LOG SERVER STARTUP
+    if HAS_LOGGING:
+        try:
+            event_logger.log_event(
+                event_type=EventType.API_REQUEST,
+                source_component="opa_server",
+                action="OPA Server started",
+                details={"port": port, "version": "1.0.0"},
+                severity=Severity.INFO,
+            )
+        except Exception as e:
+            print(f"⚠️ Failed to log server startup: {e}")
+
     print("=" * 60)
     print("🚀 Python OPA Server for ZTA Thesis")
     print("=" * 60)
@@ -451,11 +581,24 @@ def start_python_opa_server(port=8181):
     print("📝 Policies will be loaded from app/policy/policies.rego")
     print("📝 If file doesn't exist, default policies will be created")
     print("=" * 60)
+    print(f"📊 Event logging: {'ENABLED' if HAS_LOGGING else 'DISABLED'}")
     print("\nPress Ctrl+C to stop the server\n")
 
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
+        # LOG SERVER SHUTDOWN
+        if HAS_LOGGING:
+            try:
+                event_logger.log_event(
+                    event_type=EventType.API_REQUEST,
+                    source_component="opa_server",
+                    action="OPA Server stopped",
+                    severity=Severity.INFO,
+                )
+            except Exception as e:
+                print(f"⚠️ Failed to log server shutdown: {e}")
+
         print("\n🛑 Stopping Python OPA Server...")
         httpd.server_close()
 

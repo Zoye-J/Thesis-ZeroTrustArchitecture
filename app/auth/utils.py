@@ -1,7 +1,7 @@
 from functools import wraps
 from flask import request, jsonify
 from flask_jwt_extended import verify_jwt_in_request, get_jwt
-from app.logs.request_logger import log_request
+from app.logs.request_tracker import log_request
 
 
 def role_required(required_role):

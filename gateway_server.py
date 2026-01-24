@@ -20,6 +20,22 @@ app = create_gateway_app()
 
 # Import real service communicator
 from app.services.service_communicator import process_encrypted_request
+from app.logs.zta_event_logger import event_logger, EventType, Severity
+from app.logs.request_tracker import track_request_middleware
+from flask_socketio import SocketIO
+from app.audit.routes import (
+    init_socketio,
+    init_socketio_handlers,
+    start_background_updates,
+)
+
+
+socketio = SocketIO(app, cors_allowed_origins="*")
+
+init_socketio(socketio)
+init_socketio_handlers(socketio)
+track_request_middleware(app)
+start_background_updates(socketio)
 
 
 @app.before_request
@@ -153,9 +169,12 @@ if __name__ == "__main__":
     print("Authentication: mTLS + JWT")
     print("=" * 60)
 
-    app.run(
+    socketio.run(
+        app,
         debug=True,
+        host="0.0.0.0",
         port=5000,
         ssl_context=("certs/server.crt", "certs/server.key"),
-        use_reloader=False,  # Add this to prevent socket issues
+        use_reloader=False,  # Important for SocketIO
+        allow_unsafe_werkzeug=True,  # Required for debug mode with SocketIO
     )

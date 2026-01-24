@@ -18,7 +18,7 @@ import traceback
 try:
     # Try to import for API Server
     from app.api_models import User
-    from app.logs.request_logger import log_request
+    from app.logs.request_tracker import log_request
     from app.logs.zta_event_logger import zta_logger, EVENT_TYPES
 
     HAS_DB_ACCESS = True

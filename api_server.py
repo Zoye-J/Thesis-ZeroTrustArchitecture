@@ -9,6 +9,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from app.logs.zta_event_logger import event_logger, EventType, Severity
 from app.api_app import create_api_app
 
 # Create the app

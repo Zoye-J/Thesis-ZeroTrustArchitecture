@@ -6,7 +6,7 @@ from functools import wraps
 from flask import request, jsonify, g
 from flask_jwt_extended import verify_jwt_in_request, get_jwt
 from app.policy.opa_client import get_opa_client
-from app.logs.request_logger import log_request
+from app.logs.request_tracker import log_request
 import uuid
 from datetime import datetime
 
