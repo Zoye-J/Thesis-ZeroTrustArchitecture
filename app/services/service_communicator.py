@@ -8,7 +8,7 @@ import json
 import uuid
 from flask import current_app, request, g, jsonify
 import logging
-from app.logs.zta_event_logger import zta_logger, EVENT_TYPES
+from app.logs.zta_event_logger import event_logger, EventType  # CHANGED HERE
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -104,6 +104,23 @@ class EncryptedServiceCommunicator:
                 # (Client will decrypt with their private key)
                 logger.info(f"[{request_id}] Returning encrypted response to user")
 
+                # Log successful encrypted flow
+                event_logger.log_event(
+                    event_type=EventType.RESPONSE_ENCRYPTED,
+                    source_component="service_communicator",
+                    action="Encrypted response returned",
+                    user_id=user_claims.get("sub"),
+                    username=user_claims.get("username"),
+                    details={
+                        "request_id": request_id,
+                        "endpoint": flask_request.path,
+                        "encryption_used": True,
+                        "algorithm": "RSA-OAEP-SHA256",
+                    },
+                    status="success",
+                    trace_id=request_id,
+                )
+
                 return (
                     jsonify(
                         {
@@ -127,12 +144,46 @@ class EncryptedServiceCommunicator:
 
             except Exception as e:
                 logger.error(f"[{request_id}] OPA Agent communication error: {e}")
+
+                # Log error event
+                event_logger.log_event(
+                    event_type=EventType.ENCRYPTION_FAILED,
+                    source_component="service_communicator",
+                    action="OPA Agent communication error",
+                    user_id=user_claims.get("sub"),
+                    username=user_claims.get("username"),
+                    details={
+                        "request_id": request_id,
+                        "error": str(e),
+                        "endpoint": flask_request.path,
+                    },
+                    status="failure",
+                    trace_id=request_id,
+                )
+
                 return self._create_error_response(
                     500, f"OPA Agent error: {str(e)}", request_id
                 )
 
         except Exception as e:
             logger.error(f"[{request_id}] Encrypted flow error: {e}")
+
+            # Log error event
+            event_logger.log_event(
+                event_type=EventType.ERROR,
+                source_component="service_communicator",
+                action="Encrypted flow error",
+                user_id=user_claims.get("sub"),
+                username=user_claims.get("username"),
+                details={
+                    "request_id": request_id,
+                    "error": str(e),
+                    "endpoint": flask_request.path,
+                },
+                status="failure",
+                trace_id=request_id,
+            )
+
             return self._create_error_response(
                 500, f"Encrypted processing error: {str(e)}", request_id
             )
@@ -230,15 +281,18 @@ class EncryptedServiceCommunicator:
     def _create_error_response(self, status_code, message, request_id):
         """Create error response"""
         # Log error event
-        zta_logger.log_event(
-            "ENCRYPTED_FLOW_ERROR",
-            {
+        event_logger.log_event(
+            event_type=EventType.ERROR,
+            source_component="service_communicator",
+            action="Encrypted flow error",
+            details={
                 "error": message,
                 "request_id": request_id,
                 "status_code": status_code,
                 "flow_step": "service_communicator",
             },
-            request_id=request_id,
+            status="failure",
+            trace_id=request_id,
         )
 
         return (

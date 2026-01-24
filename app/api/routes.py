@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify, current_app, g
 from app.mTLS.middleware import require_authentication, require_mtls
-from app.logs.zta_event_logger import zta_logger, EVENT_TYPES
+from app.logs.zta_event_logger import event_logger, EventType, Severity
 from datetime import datetime
 import uuid
 import hashlib
@@ -38,15 +38,19 @@ def simple_zta_test():
                     email = attr.value
 
             # Log mTLS certificate detection
-            zta_logger.log_event(
-                EVENT_TYPES["MTLS_CERT_VALIDATED"],
-                {
+            event_logger.log_event(
+                event_type=EventType.MTLS_HANDSHAKE,
+                source_component="gateway",
+                action="mTLS certificate validated",
+                source_ip=request.remote_addr or "127.0.0.1",
+                details={
                     "certificate_present": True,
                     "email": email,
                     "fingerprint_short": fingerprint[:16] + "...",
                     "test_endpoint": True,
                 },
-                request_id=request_id,
+                trace_id=request_id,
+                severity=Severity.INFO,
             )
 
             return (
@@ -71,10 +75,17 @@ def simple_zta_test():
                 200,
             )
         except Exception as e:
-            zta_logger.log_event(
-                "CERTIFICATE_ERROR",
-                {"error": str(e), "certificate_present": True},
-                request_id=request_id,
+            event_logger.log_event(
+                event_type=EventType.CLIENT_CERT_INVALID,
+                source_component="gateway",
+                action="Certificate error",
+                source_ip=request.remote_addr or "127.0.0.1",
+                details={
+                    "error": str(e),
+                    "certificate_present": True,
+                },
+                trace_id=request_id,
+                severity=Severity.HIGH,
             )
             return (
                 jsonify(
@@ -88,10 +99,17 @@ def simple_zta_test():
             )
 
     # No certificate
-    zta_logger.log_event(
-        EVENT_TYPES["MTLS_CERT_REJECTED"],
-        {"reason": "No client certificate provided", "test_endpoint": True},
-        request_id=request_id,
+    event_logger.log_event(
+        event_type=EventType.CLIENT_CERT_INVALID,
+        source_component="gateway",
+        action="No client certificate provided",
+        source_ip=request.remote_addr or "127.0.0.1",
+        details={
+            "reason": "No client certificate provided",
+            "test_endpoint": True,
+        },
+        trace_id=request_id,
+        severity=Severity.MEDIUM,
     )
 
     return (
@@ -165,10 +183,16 @@ def test_zta_auth():
             return jsonify({"error": "Authentication required"}), 401
 
     except Exception as e:
-        zta_logger.log_event(
-            "ZTA_TEST_ERROR",
-            {"error": str(e), "test_endpoint": True},
-            request_id=getattr(g, "request_id", str(uuid.uuid4())),
+        event_logger.log_event(
+            event_type=EventType.ERROR,
+            source_component="gateway",
+            action="ZTA test error",
+            details={
+                "error": str(e),
+                "test_endpoint": True,
+            },
+            trace_id=getattr(g, "request_id", str(uuid.uuid4())),
+            severity=Severity.MEDIUM,
         )
         return jsonify({"error": "ZTA test failed", "message": str(e)}), 500
 
@@ -226,10 +250,16 @@ def verify_certificate():
         )
 
     except Exception as e:
-        zta_logger.log_event(
-            "CERTIFICATE_VERIFICATION_ERROR",
-            {"error": str(e), "client_ip": request.remote_addr},
-            request_id=getattr(g, "request_id", str(uuid.uuid4())),
+        event_logger.log_event(
+            event_type=EventType.ERROR,
+            source_component="gateway",
+            action="Certificate verification error",
+            source_ip=request.remote_addr or "127.0.0.1",
+            details={
+                "error": str(e),
+            },
+            trace_id=getattr(g, "request_id", str(uuid.uuid4())),
+            severity=Severity.HIGH,
         )
         return (
             jsonify({"error": "Certificate verification failed", "message": str(e)}),

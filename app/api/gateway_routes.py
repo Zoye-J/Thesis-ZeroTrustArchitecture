@@ -5,7 +5,7 @@ These endpoints implement: User → Gateway → OPA Agent → OPA Server → API
 
 from flask import Blueprint, request, jsonify, current_app, g, render_template
 from app.mTLS.middleware import require_authentication, require_mtls
-from app.logs.zta_event_logger import zta_logger, EVENT_TYPES
+from app.logs.zta_event_logger import event_logger, EventType, Severity
 from datetime import datetime
 import uuid
 import hashlib

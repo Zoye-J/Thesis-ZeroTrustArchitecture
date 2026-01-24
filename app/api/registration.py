@@ -3,13 +3,12 @@ from app.api_models import db, User
 from werkzeug.security import generate_password_hash
 from datetime import datetime
 import re
-import hashlib  # ADD THIS
-import os  # ADD THIS
-import json  # ADD THIS
-from app.logs.zta_event_logger import zta_logger, EVENT_TYPES
+import hashlib  #
+import os
+import json
+from app.logs.zta_event_logger import event_logger, EventType
 import uuid
-from app.opa_agent.crypto_handler import CryptoHandler  # This will need to be created
-
+from app.opa_agent.crypto_handler import CryptoHandler 
 registration_bp = Blueprint("registration", __name__)
 
 # Email domain to facility mapping
@@ -221,20 +220,20 @@ def register_user():
             private_key_path = None
 
         # Log successful registration
-        zta_logger.log_event(
-            EVENT_TYPES["JWT_TOKEN_ISSUED"],
-            {
-                "user_id": new_user.id,
-                "username": new_user.username,
+        event_logger.log_event(
+            event_type=EventType.USER_REGISTER,  # Changed from JWT_TOKEN_ISSUED to USER_REGISTER
+            source_component="api_server",
+            action="User registration",
+            user_id=new_user.id,
+            username=new_user.username,
+            details={
                 "email": new_user.email,
                 "facility": new_user.facility,
                 "department": new_user.department,
                 "clearance": new_user.clearance_level,
                 "has_rsa_keys": public_key is not None,
-                "action": "user_registered",
             },
-            user_id=new_user.id,
-            request_id=request_id,
+            trace_id=request_id,
         )
 
         response_data = {

@@ -6,7 +6,7 @@ No authentication decorators - gateway handles authentication
 from flask import Blueprint, request, jsonify, current_app, g
 from app.api_models import db, User, GovernmentDocument, AccessLog
 from app.logs.request_tracker import log_request
-from app.logs.zta_event_logger import zta_logger, EVENT_TYPES
+from app.logs.zta_event_logger import event_logger, EventType
 from datetime import datetime
 import uuid
 import json

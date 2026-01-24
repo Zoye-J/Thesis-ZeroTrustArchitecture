@@ -5,7 +5,7 @@ import uuid
 from flask import current_app, request
 from datetime import datetime
 import logging
-from app.logs.zta_event_logger import zta_logger
+from app.logs.zta_event_logger import event_logger, EventType  # CHANGED HERE
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +122,26 @@ class OPAClient:
                         f"📊 OPA Decision: {'ALLOWED ✅' if allowed else 'DENIED ❌'} - {reason}"
                     )
 
+                    # Log event
+                    event_logger.log_event(
+                        event_type=(
+                            EventType.POLICY_ALLOW if allowed else EventType.POLICY_DENY
+                        ),
+                        source_component="OPA",
+                        action="Document access evaluation",
+                        user_id=user_claims.get("id") or user_claims.get("sub"),
+                        username=user_claims.get("username"),
+                        resource=doc_dict.get("document_id"),
+                        details={
+                            "document_id": doc_dict.get("document_id"),
+                            "classification": doc_dict.get("classification"),
+                            "reason": reason,
+                            "opa_result": result,
+                        },
+                        status="success" if allowed else "failure",
+                        trace_id=input_data.get("request_id"),
+                    )
+
                     return {
                         "allowed": allowed,
                         "reason": reason,
@@ -154,6 +174,26 @@ class OPAClient:
                         f"📊 OPA Decision: {'ALLOWED ✅' if allowed else 'DENIED ❌'} - {reason}"
                     )
 
+                    # Log event
+                    event_logger.log_event(
+                        event_type=(
+                            EventType.POLICY_ALLOW if allowed else EventType.POLICY_DENY
+                        ),
+                        source_component="OPA",
+                        action="Document access evaluation",
+                        user_id=user_claims.get("id") or user_claims.get("sub"),
+                        username=user_claims.get("username"),
+                        resource=doc_dict.get("document_id"),
+                        details={
+                            "document_id": doc_dict.get("document_id"),
+                            "classification": doc_dict.get("classification"),
+                            "reason": reason,
+                            "opa_result": opa_result,
+                        },
+                        status="success" if allowed else "failure",
+                        trace_id=input_data.get("request_id"),
+                    )
+
                     return {
                         "allowed": allowed,
                         "reason": reason,
@@ -179,9 +219,44 @@ class OPAClient:
             # If we get here, something went wrong with OPA
             logger.warning(f"⚠️ OPA unexpected response: {result}")
 
+            # Log error event
+            event_logger.log_event(
+                event_type=EventType.ERROR,
+                source_component="OPA",
+                action="Document access evaluation error",
+                user_id=user_claims.get("id") or user_claims.get("sub"),
+                username=user_claims.get("username"),
+                resource=doc_dict.get("document_id"),
+                details={
+                    "document_id": doc_dict.get("document_id"),
+                    "classification": doc_dict.get("classification"),
+                    "error": "Unexpected OPA response",
+                    "opa_response": result,
+                },
+                status="failure",
+                trace_id=input_data.get("request_id"),
+            )
+
             # Fallback: If superadmin, allow access (for demo purposes)
             if user_claims.get("user_class") == "superadmin":
                 logger.info("⚠️ OPA error - falling back to ALLOW for superadmin")
+
+                event_logger.log_event(
+                    event_type=EventType.POLICY_ALLOW,
+                    source_component="OPA",
+                    action="Superadmin fallback access",
+                    user_id=user_claims.get("id") or user_claims.get("sub"),
+                    username=user_claims.get("username"),
+                    resource=doc_dict.get("document_id"),
+                    details={
+                        "document_id": doc_dict.get("document_id"),
+                        "classification": doc_dict.get("classification"),
+                        "reason": "Superadmin fallback (OPA error)",
+                    },
+                    status="success",
+                    trace_id=input_data.get("request_id"),
+                )
+
                 return {
                     "allowed": True,
                     "reason": "Superadmin fallback access (OPA error)",
@@ -211,6 +286,20 @@ class OPAClient:
 
         except Exception as e:
             logger.error(f"OPA evaluation error: {str(e)}")
+
+            # Log error event
+            event_logger.log_event(
+                event_type=EventType.ERROR,
+                source_component="OPA",
+                action="Document access evaluation exception",
+                user_id=user_claims.get("id") or user_claims.get("sub"),
+                username=user_claims.get("username"),
+                details={
+                    "error": str(e),
+                    "document_info": str(document),
+                },
+                status="failure",
+            )
 
             # Fallback for superadmin
             if user_claims.get("user_class") == "superadmin":

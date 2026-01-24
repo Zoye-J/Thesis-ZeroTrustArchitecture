@@ -14,6 +14,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from flask import current_app
 import base64
+from app.logs.zta_event_logger import event_logger, EventType  # CHANGED HERE
 
 
 class CertificateManager:
@@ -51,8 +52,6 @@ class CertificateManager:
         self, cert_pem, request_id=None, client_ip=None
     ):
         """Enhanced certificate validation with detailed logging for dashboard"""
-        from app.logs.zta_event_logger import zta_logger
-
         validation_checks = {
             "certificate_present": False,
             "format_valid": False,
@@ -145,15 +144,17 @@ class CertificateManager:
 
             if request_id:
                 event_type = (
-                    "CERTIFICATE_VALIDATION_PASSED"
+                    EventType.CLIENT_CERT_VALID
                     if all_passed
-                    else "CERTIFICATE_VALIDATION_FAILED"
+                    else EventType.CLIENT_CERT_INVALID
                 )
-                zta_logger.log_event(
-                    event_type,
-                    log_details,
-                    user_id=subject.get("emailAddress"),
-                    request_id=request_id,
+                event_logger.log_event(
+                    event_type=event_type,
+                    source_component="mTLS",
+                    action="Certificate validation",
+                    details=log_details,
+                    status="success" if all_passed else "failure",
+                    trace_id=request_id,
                 )
 
             return all_passed, cert_info, validation_checks
@@ -169,16 +170,19 @@ class CertificateManager:
             }
 
         if request_id:
-            zta_logger.log_event(
-                "CERTIFICATE_VALIDATION_ERROR", log_details, request_id=request_id
+            event_logger.log_event(
+                event_type=EventType.ERROR,
+                source_component="mTLS",
+                action="Certificate validation error",
+                details=log_details,
+                status="failure",
+                trace_id=request_id,
             )
 
         return False, cert_info, validation_checks
 
     def log_certificate_verification_summary(self, cert_pem, request_id, client_ip):
         """Create a summary log entry for certificate verification"""
-        from app.logs.zta_event_logger import zta_logger
-
         try:
             cert = x509.load_pem_x509_certificate(cert_pem.encode(), default_backend())
             fingerprint = cert.fingerprint(hashes.SHA256()).hex()
@@ -213,17 +217,25 @@ class CertificateManager:
                 "key_usage": self.extract_key_usage(cert),
             }
 
-            zta_logger.log_event(
-                "CERTIFICATE_VERIFICATION_SUMMARY", summary, request_id=request_id
+            event_logger.log_event(
+                event_type=EventType.CLIENT_CERT_VALID,
+                source_component="mTLS",
+                action="Certificate verification summary",
+                details=summary,
+                status="success",
+                trace_id=request_id,
             )
 
             return summary
 
         except Exception as e:
-            zta_logger.log_event(
-                "CERTIFICATE_SUMMARY_ERROR",
-                {"error": str(e), "client_ip": client_ip},
-                request_id=request_id,
+            event_logger.log_event(
+                event_type=EventType.ERROR,
+                source_component="mTLS",
+                action="Certificate summary error",
+                details={"error": str(e), "client_ip": client_ip},
+                status="failure",
+                trace_id=request_id,
             )
             return None
 

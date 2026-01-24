@@ -19,7 +19,7 @@ try:
     # Try to import for API Server
     from app.api_models import User
     from app.logs.request_tracker import log_request
-    from app.logs.zta_event_logger import zta_logger, EVENT_TYPES
+    from app.logs.zta_event_logger import event_logger, EventType, Severity
 
     HAS_DB_ACCESS = True
     print("✅ Auth routes: Running in API Server mode (DB access enabled)")
@@ -33,15 +33,23 @@ except ImportError:
         pass
 
     class DummyZTALogger:
-        def log_event(self, event_type, details=None, user_id=None, request_id=None):
-            print(f"[ZTA Log] {event_type}: {details}")
+        def log_event(
+            self,
+            event_type=None,
+            source_component=None,
+            action=None,
+            user_id=None,
+            username=None,
+            details=None,
+            trace_id=None,
+            severity=None,
+            **kwargs,
+        ):
+            print(f"[ZTA Log] {event_type}: {action} - {details}")
 
-    zta_logger = DummyZTALogger()
-    EVENT_TYPES = {
-        "JWT_TOKEN_ISSUED": "JWT_TOKEN_ISSUED",
-        "LOGIN_ATTEMPT": "LOGIN_ATTEMPT",
-        "TOKEN_REFRESH_ATTEMPT": "TOKEN_REFRESH_ATTEMPT",
-    }
+    event_logger = DummyZTALogger()
+    EventType = type("EventType", (), {})
+    Severity = type("Severity", (), {})
     print("✅ Auth routes: Running in Gateway Server mode (API calls only)")
 
 auth_bp = Blueprint("auth", __name__)
@@ -113,16 +121,19 @@ def login():
             return jsonify({"error": "Username and password required"}), 400
 
         # Log login attempt
-        zta_logger.log_event(
-            "LOGIN_ATTEMPT",
-            {
-                "username": username,
-                "source_ip": request.remote_addr,
+        event_logger.log_event(
+            event_type=EventType.USER_LOGIN,
+            source_component="auth_server",
+            action="Login attempt",
+            username=username,
+            source_ip=request.remote_addr or "127.0.0.1",
+            details={
                 "user_agent": (
                     request.user_agent.string[:200] if request.user_agent else None
                 ),
             },
-            request_id=request_id,
+            trace_id=request_id,
+            severity=Severity.INFO,
         )
 
         # ======== CHECK SERVER MODE ========
@@ -137,7 +148,7 @@ def login():
         error_traceback = traceback.format_exc()
         print(f"Login error: {e}")
 
-        zta_logger.log_event(
+        event_logger.log_event(
             "LOGIN_ERROR",
             {
                 "error": str(e),
@@ -194,19 +205,20 @@ def handle_login_api_mode(username, password, request_id):
     )
 
     # Log successful login
-    zta_logger.log_event(
-        EVENT_TYPES["JWT_TOKEN_ISSUED"],
-        {
-            "user_id": user.id,
-            "username": user.username,
+    event_logger.log_event(
+        event_type=EventType.JWT_ISSUED,
+        source_component="auth_server",
+        action="JWT token issued",
+        user_id=user.id,
+        username=user.username,
+        details={
             "token_claims": additional_claims,
             "auth_method": "password",
             "token_expires": (datetime.utcnow() + timedelta(hours=8)).isoformat(),
         },
-        user_id=user.id,
-        request_id=request_id,
+        trace_id=request_id,
+        severity=Severity.INFO,
     )
-
     log_request(
         user_id=user.id,
         endpoint="/login",
@@ -267,14 +279,15 @@ def refresh():
         request_id = str(uuid.uuid4())
 
         # Log token refresh attempt
-        zta_logger.log_event(
-            "TOKEN_REFRESH_ATTEMPT",
-            {
-                "user_id": current_user_id,
-                "source_ip": request.remote_addr,
-            },
+        event_logger.log_event(
+            event_type=EventType.JWT_VALIDATED,
+            source_component="auth_server",
+            action="Token refresh attempt",
             user_id=current_user_id,
-            request_id=request_id,
+            source_ip=request.remote_addr or "127.0.0.1",
+            details={},
+            trace_id=request_id,
+            severity=Severity.INFO,
         )
 
         if HAS_DB_ACCESS:
@@ -314,15 +327,17 @@ def refresh():
         )
 
         # Log successful refresh
-        zta_logger.log_event(
-            EVENT_TYPES["JWT_TOKEN_ISSUED"],
-            {
-                "user_id": current_user_id,
+        event_logger.log_event(
+            event_type=EventType.JWT_ISSUED,
+            source_component="auth_server",
+            action="Token refreshed",
+            user_id=current_user_id,
+            details={
                 "action": "token_refresh",
                 "new_expiry": (datetime.utcnow() + timedelta(hours=8)).isoformat(),
             },
-            user_id=current_user_id,
-            request_id=request_id,
+            trace_id=request_id,
+            severity=Severity.INFO,
         )
 
         return jsonify({"access_token": access_token}), 200

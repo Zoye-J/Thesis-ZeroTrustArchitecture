@@ -8,7 +8,7 @@ from flask import request, jsonify, current_app, g
 from functools import wraps
 import base64
 from datetime import datetime
-from app.logs.zta_event_logger import zta_logger, EVENT_TYPES
+from app.logs.zta_event_logger import event_logger, EventType  # CHANGED HERE
 import uuid
 from cryptography.hazmat.backends import default_backend
 from cryptography import x509
@@ -206,14 +206,17 @@ def require_mtls(f):
 
         if not cert_pem:
             # Log certificate missing
-            zta_logger.log_event(
-                EVENT_TYPES["MTLS_CERT_REJECTED"],
-                {
+            event_logger.log_event(  # CHANGED HERE
+                event_type=EventType.CLIENT_CERT_INVALID,  # Use EventType enum
+                source_component="mTLS",
+                action="Certificate missing",
+                details={
                     "reason": "No client certificate provided",
                     "endpoint": request.path,
                     "required": True,
                 },
-                request_id=request_id,
+                status="failure",
+                trace_id=request_id,
             )
             return (
                 jsonify(
@@ -247,14 +250,17 @@ def require_mtls(f):
         from app.mTLS.cert_manager import cert_manager
 
         if cert_manager.is_certificate_revoked(cert_info.get("serial_number", "")):
-            zta_logger.log_event(
-                "CERTIFICATE_REVOKED",
-                {
+            event_logger.log_event(  # CHANGED HERE
+                event_type=EventType.CLIENT_CERT_INVALID,
+                source_component="mTLS",
+                action="Certificate revoked",
+                details={
                     "serial": cert_info.get("serial_number"),
                     "fingerprint": cert_info.get("fingerprint", "")[:16] + "...",
                     "action": "access_denied",
                 },
-                request_id=request_id,
+                status="failure",
+                trace_id=request_id,
             )
             return (
                 jsonify(
@@ -272,9 +278,11 @@ def require_mtls(f):
             g.client_public_key = public_key
 
         # Log successful mTLS authentication
-        zta_logger.log_event(
-            EVENT_TYPES["MTLS_CERT_VALIDATED"],
-            {
+        event_logger.log_event(  # CHANGED HERE
+            event_type=EventType.CLIENT_CERT_VALID,
+            source_component="mTLS",
+            action="Certificate validated",
+            details={
                 "fingerprint": cert_info.get("fingerprint", "")[:16] + "...",
                 "subject": cert_info.get("subject", {}),
                 "issuer": cert_info.get("issuer", {}),
@@ -288,7 +296,8 @@ def require_mtls(f):
                     "not_revoked",
                 ],
             },
-            request_id=request_id,
+            status="success",
+            trace_id=request_id,
         )
 
         # Add certificate info to Flask's g object
@@ -377,24 +386,29 @@ def log_mtls_handshake(cert_pem, request_id=None):
             subject_email = cert_info.get("subject", {}).get("emailAddress", "Unknown")
 
             # Log successful handshake
-            zta_logger.log_event(
-                EVENT_TYPES["MTLS_HANDSHAKE_START"],
-                {
+            event_logger.log_event(  # CHANGED HERE
+                event_type=EventType.MTLS_HANDSHAKE,
+                source_component="mTLS",
+                action="Handshake started",
+                details={
                     "client": subject_email,
                     "client_ip": client_ip,
                     "certificate_fingerprint": cert_info.get("fingerprint", "")[:16]
                     + "...",
                     "validation_checks": validation_checks,
                 },
-                request_id=request_id,
+                status="success",
+                trace_id=request_id,
             )
 
         else:
             # Log failed handshake with detailed reason
             failed_checks = [k for k, v in validation_checks.items() if not v]
-            zta_logger.log_event(
-                EVENT_TYPES["MTLS_CERT_REJECTED"],
-                {
+            event_logger.log_event(  # CHANGED HERE
+                event_type=EventType.CLIENT_CERT_INVALID,
+                source_component="mTLS",
+                action="Certificate rejected",
+                details={
                     "certificate_present": bool(cert_pem),
                     "failed_validation_checks": failed_checks,
                     "client_ip": client_ip,
@@ -403,19 +417,23 @@ def log_mtls_handshake(cert_pem, request_id=None):
                         cert_info if isinstance(cert_info, str) else "multiple_failures"
                     ),
                 },
-                request_id=request_id,
+                status="failure",
+                trace_id=request_id,
             )
 
         return is_valid, cert_info if is_valid else None
 
     except Exception as e:
-        zta_logger.log_event(
-            "MTLS_HANDSHAKE_ERROR",
-            {
+        event_logger.log_event(  # CHANGED HERE
+            event_type=EventType.ERROR,
+            source_component="mTLS",
+            action="Handshake error",
+            details={
                 "error": str(e),
                 "certificate_present": bool(cert_pem),
                 "client_ip": client_ip,
             },
-            request_id=request_id,
+            status="failure",
+            trace_id=request_id,
         )
         return False, str(e)
