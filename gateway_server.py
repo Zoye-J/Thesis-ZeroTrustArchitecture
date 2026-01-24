@@ -1,12 +1,13 @@
-# gateway_server.py - FIXED VERSION
+# gateway_server.py - UPDATED (Remove SocketIO)
 """
 ZTA Gateway Server - Handles client authentication (mTLS + JWT)
 Forwards authorized requests to API server
-UPDATED: Uses real service communicator
+mTLS + HTTPS only - NO WebSockets
 """
 
 import sys
 import os
+import ssl
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -22,20 +23,8 @@ app = create_gateway_app()
 from app.services.service_communicator import process_encrypted_request
 from app.logs.zta_event_logger import event_logger, EventType, Severity
 from app.logs.request_tracker import track_request_middleware
-from flask_socketio import SocketIO
-from app.audit.routes import (
-    init_socketio,
-    init_socketio_handlers,
-    start_background_updates,
-)
 
-
-socketio = SocketIO(app, cors_allowed_origins="*")
-
-init_socketio(socketio)
-init_socketio_handlers(socketio)
 track_request_middleware(app)
-start_background_updates(socketio)
 
 
 @app.before_request
@@ -52,9 +41,6 @@ def gateway_proxy(subpath):
     Uses REAL service communicator for distributed flow
     """
     try:
-        # Authenticate client (using middleware decorators)
-        # The authentication will be handled by require_authentication decorator
-        # on individual endpoints in app/api/gateway_routes.py
 
         # For now, we'll handle authentication directly here
         from app.mTLS.middleware import (
@@ -163,18 +149,18 @@ def health():
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("ZTA GATEWAY SERVER")
+    print("ZTA GATEWAY SERVER (mTLS + HTTPS)")
     print("=" * 60)
     print(f"Port: 5000")
     print("Authentication: mTLS + JWT")
+    print("Dashboard: http://localhost:5002")
     print("=" * 60)
 
-    socketio.run(
-        app,
-        debug=True,
-        host="0.0.0.0",
-        port=5000,
-        ssl_context=("certs/server.crt", "certs/server.key"),
-        use_reloader=False,  # Important for SocketIO
-        allow_unsafe_werkzeug=True,  # Required for debug mode with SocketIO
-    )
+    # Setup SSL context for mTLS
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain("certs/server.crt", "certs/server.key")
+    context.load_verify_locations("certs/ca.crt")
+    context.verify_mode = ssl.CERT_REQUIRED  # Enable client certificate verification
+
+    # Run with proper SSL + mTLS
+    app.run(host="0.0.0.0", port=5000, ssl_context=context, debug=True)

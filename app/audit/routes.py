@@ -26,6 +26,19 @@ def init_socketio(sio):
     event_logger.set_socketio(sio)
 
 
+def get_redis_status():
+    """Check Redis connection status"""
+    try:
+        from app.logs.zta_event_logger import event_logger
+
+        if event_logger.redis_client:
+            event_logger.redis_client.ping()
+            return "connected"
+        return "not_configured"
+    except Exception as e:
+        return f"error: {str(e)}"
+
+
 @audit_bp.route("/dashboard")
 def dashboard():
     """Main audit dashboard"""
@@ -236,3 +249,30 @@ def start_background_updates(sio):
 
     thread = threading.Thread(target=send_periodic_updates, daemon=True)
     thread.start()
+
+
+def get_redis_status():
+    """Check Redis connection status"""
+    try:
+        from app.logs.zta_event_logger import event_logger
+
+        if event_logger.redis_client:
+            event_logger.redis_client.ping()
+            return "connected"
+    except:
+        pass
+    return "disconnected"
+
+
+# Add a new route for dashboard health
+@audit_bp.route("/health")
+def dashboard_health():
+    """Dashboard health endpoint"""
+    return jsonify(
+        {
+            "status": "healthy",
+            "redis": get_redis_status(),
+            "event_count": len(event_logger.events_buffer),
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+    )
