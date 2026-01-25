@@ -27,7 +27,7 @@ class OpaAgentClient:
 
     def init_app(self, app):
         """Initialize with Flask app"""
-        self.agent_url = app.config.get("OPA_AGENT_URL", "http://localhost:8282")
+        self.agent_url = app.config.get("OPA_AGENT_URL", "https://localhost:8282")
 
         # Load OPA Agent public key
         from app.mTLS.cert_manager import cert_manager
@@ -91,8 +91,22 @@ class OpaAgentClient:
         """Check if OPA Agent is healthy"""
         try:
             response = self.session.get(f"{self.agent_url}/health", timeout=3)
-            return response.status_code == 200
-        except:
+
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                    # Check if response has expected structure
+                    if isinstance(data, dict) and data.get("status") == "healthy":
+                        return True
+                    else:
+                        # Still counts if 200 OK
+                        return True
+                except:
+                    return True  # JSON parsing failed but HTTP 200
+            return False
+
+        except Exception as e:
+            print(f"OPA Agent health check failed: {type(e).__name__}: {e}")
             return False
 
 

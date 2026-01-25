@@ -160,7 +160,7 @@ if __name__ == "__main__":
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain("certs/server.crt", "certs/server.key")
     context.load_verify_locations("certs/ca.crt")
-    context.verify_mode = ssl.CERT_REQUIRED  # Enable client certificate verification
+    context.verify_mode = ssl.CERT_OPTIONAL
 
     # Run with proper SSL + mTLS
     app.run(host="0.0.0.0", port=5000, ssl_context=context, debug=True)

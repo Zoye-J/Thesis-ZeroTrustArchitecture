@@ -8,6 +8,9 @@ import json
 from datetime import datetime, timedelta
 import threading
 import time
+import urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from app.logs.zta_event_logger import event_logger, ZTAEvent, Severity
 from app.logs.request_tracker import request_tracker
@@ -78,15 +81,39 @@ def get_statistics():
     # Add active requests
     stats["active_requests"] = len(request_tracker.active_requests)
 
-    # Add server status
-    stats["server_status"] = {
-        "gateway": "running",
-        "opa_agent": "running",
-        "opa_server": "running",
-        "api_server": "running",
-    }
+    stats["server_status"] = check_real_server_status()
 
     return jsonify(stats)
+
+
+def check_real_server_status():
+    """Simple port checking instead of HTTP requests"""
+    import socket
+
+    servers = {
+        "gateway": ("localhost", 5000),
+        "api_server": ("localhost", 5001),
+        "opa_agent": ("localhost", 8282),
+        "opa_server": ("localhost", 8181),
+    }
+
+    status = {}
+
+    for server_name, (host, port) in servers.items():
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(2)
+            result = sock.connect_ex((host, port))
+            sock.close()
+
+            if result == 0:
+                status[server_name] = "running"
+            else:
+                status[server_name] = "down"
+        except:
+            status[server_name] = "error"
+
+    return status
 
 
 @audit_bp.route("/trace/<trace_id>")
@@ -276,3 +303,60 @@ def dashboard_health():
             "timestamp": datetime.utcnow().isoformat(),
         }
     )
+
+
+@audit_bp.route("/events/recent")
+def get_recent_events_api():
+    """API endpoint for recent events (for dashboard AJAX calls)"""
+    try:
+        limit = request.args.get("limit", 50, type=int)
+        events = event_logger.get_recent_events(limit)
+
+        return jsonify(
+            {
+                "success": True,
+                "events": [event.to_dict() for event in events],
+                "total": len(events),
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+        )
+
+    except Exception as e:
+        return (
+            jsonify({"success": False, "error": str(e), "events": [], "total": 0}),
+            500,
+        )
+
+
+@audit_bp.route("/events")
+def get_filtered_events():
+    """Get filtered events"""
+    try:
+        limit = request.args.get("limit", 50, type=int)
+        event_type = request.args.get("type")
+        severity = request.args.get("severity")
+        component = request.args.get("component")
+
+        events = event_logger.get_recent_events(limit)
+
+        # Apply filters
+        filtered = []
+        for event in events:
+            if event_type and event.event_type != event_type:
+                continue
+            if severity and event.severity != severity:
+                continue
+            if component and event.source_component != component:
+                continue
+            filtered.append(event.to_dict())
+
+        return jsonify({"events": filtered, "total": len(filtered)})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@audit_bp.route("/api/audit/events/recent")
+def api_audit_events_recent():
+    """Legacy endpoint for compatibility"""
+    return get_recent_events_api()
