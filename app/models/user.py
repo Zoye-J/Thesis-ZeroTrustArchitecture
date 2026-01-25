@@ -28,6 +28,13 @@ class User(db.Model):
     mfa_enabled = db.Column(db.Boolean, default=False)
     last_certificate_auth = db.Column(db.DateTime, nullable=True)
 
+    # RSA Key fields
+    public_key = db.Column(db.Text, nullable=True)  # PEM format
+    public_key_fingerprint = db.Column(db.String(64), unique=True, nullable=True)
+    private_key_path = db.Column(
+        db.String(500), nullable=True
+    )  # Path to encrypted private key
+
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
 

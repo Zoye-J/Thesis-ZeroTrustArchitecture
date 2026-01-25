@@ -20,13 +20,13 @@ class Config:
     API_SERVER_PORT = int(os.environ.get("API_SERVER_PORT", 5001))
     GATEWAY_SERVER_PORT = int(os.environ.get("GATEWAY_SERVER_PORT", 5000))
     OPA_SERVER_PORT = int(os.environ.get("OPA_SERVER_PORT", 8181))
-    OPA_AGENT_PORT = int(os.environ.get("OPA_AGENT_PORT", 8282))  # NEW
+    OPA_AGENT_PORT = int(os.environ.get("OPA_AGENT_PORT", 8282))
 
     # ============ SERVICE COMMUNICATION URLs ============
     OPA_SERVER_URL = os.environ.get("OPA_SERVER_URL", "http://localhost:8181")
     API_SERVER_URL = os.environ.get("API_SERVER_URL", "http://localhost:5001")
     GATEWAY_SERVER_URL = os.environ.get("GATEWAY_SERVER_URL", "https://localhost:5000")
-    OPA_AGENT_URL = os.environ.get("OPA_AGENT_URL", "http://localhost:8282")  # NEW
+    OPA_AGENT_URL = os.environ.get("OPA_AGENT_URL", "http://localhost:8282")
 
     # Timeouts
     OPA_TIMEOUT = int(os.environ.get("OPA_TIMEOUT", 5))

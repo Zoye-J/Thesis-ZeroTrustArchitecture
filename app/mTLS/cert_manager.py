@@ -37,15 +37,29 @@ class CertificateManager:
             print(f"Created keys directory: {self.keys_dir}")
 
     def run_openssl_command(self, cmd):
-        """Execute OpenSSL command"""
+        """Execute OpenSSL command with better error handling"""
         try:
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            # Clean up command (remove extra spaces/newlines)
+            cmd = " ".join(cmd.split())
+
+            print(f"  Running: {cmd[:80]}...")
+
+            result = subprocess.run(
+                cmd, shell=True, capture_output=True, text=True, timeout=30
+            )
+
             if result.returncode != 0:
-                print(f"OpenSSL Error: {result.stderr}")
+                print(f"  ❌ OpenSSL Error (code {result.returncode}):")
+                if result.stderr:
+                    print(f"     Error: {result.stderr[:200]}")
                 return False
+
             return True
+        except subprocess.TimeoutExpired:
+            print(f"  ❌ OpenSSL command timed out")
+            return False
         except Exception as e:
-            print(f"Command execution error: {e}")
+            print(f"  ❌ Command execution error: {e}")
             return False
 
     def validate_certificate_with_detailed_logging(
@@ -638,6 +652,41 @@ subjectAltName = email:{email}
 
         # Generate if doesn't exist
         return self.generate_opa_agent_keys()
+
+    def create_p12_bundle(self, user_id, p12_password):
+        """Create PKCS12 bundle for browser import"""
+        try:
+            client_dir = os.path.join(self.cert_dir, "clients", str(user_id))
+            client_key = os.path.join(client_dir, "client.key")
+            client_crt = os.path.join(client_dir, "client.crt")
+            client_p12 = os.path.join(client_dir, "client.p12")
+
+            # Check if files exist
+            if not os.path.exists(client_key):
+                return False, f"Private key not found: {client_key}"
+            if not os.path.exists(client_crt):
+                return False, f"Certificate not found: {client_crt}"
+            if not os.path.exists(self.ca_cert_path):
+                return False, f"CA certificate not found: {self.ca_cert_path}"
+
+            print(f"  Creating P12 bundle for user {user_id}...")
+
+            # Create PKCS12 bundle (for browsers)
+            p12_cmd = f"""
+            openssl pkcs12 -export -out "{client_p12}" \
+            -inkey "{client_key}" -in "{client_crt}" \
+            -certfile "{self.ca_cert_path}" -passout pass:{p12_password}
+            """
+
+            success = self.run_openssl_command(p12_cmd)
+            if success:
+                print(f"  ✅ P12 bundle created: {client_p12}")
+                return True, client_p12
+            else:
+                return False, "Failed to create P12 bundle"
+
+        except Exception as e:
+            return False, str(e)
 
 
 # Singleton instance

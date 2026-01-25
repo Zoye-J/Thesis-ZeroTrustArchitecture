@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime
 from app import cors
 from app.config import DevelopmentConfig
-from app.api_models import db  # Import from api_models, not from app
+from app.api_models import db
 
 
 def create_api_app(config_name="development"):
@@ -87,5 +87,3 @@ def create_api_app(config_name="development"):
         print("✅ API Server: Database initialized")
 
     return app
-
-

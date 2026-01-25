@@ -1,4 +1,3 @@
-# api_server.py - FIXED VERSION
 """
 ZTA API Server - Business logic and database operations
 Only accepts requests from Gateway with valid service tokens

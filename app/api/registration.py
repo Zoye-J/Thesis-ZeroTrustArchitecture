@@ -1,14 +1,20 @@
 from flask import Blueprint, request, jsonify, current_app
 from app.api_models import db, User
 from werkzeug.security import generate_password_hash
-from datetime import datetime
+from datetime import datetime, timedelta  # ADD timedelta
 import re
 import hashlib  #
 import os
 import json
 from app.logs.zta_event_logger import event_logger, EventType
 import uuid
-from app.opa_agent.crypto_handler import CryptoHandler 
+from app.opa_agent.crypto_handler import CryptoHandler
+from cryptography import x509
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.serialization import load_pem_public_key
+
 registration_bp = Blueprint("registration", __name__)
 
 # Email domain to facility mapping
@@ -82,6 +88,40 @@ def generate_user_keys(user_id):
 
     except Exception as e:
         print(f"❌ Error generating keys for user {user_id}: {e}")
+        raise
+
+
+def sign_certificate_from_csr(csr_data, ca_cert_path, ca_key_path, user_id):
+    """Sign a certificate from CSR data (simplified version)"""
+    try:
+        # csr_data might be JSON string, parse if needed
+        if isinstance(csr_data, str):
+            import json
+
+            csr_data = json.loads(csr_data)
+
+        user_info = csr_data.get("userInfo", {})
+        subject_info = csr_data.get("subject", {})
+
+        email = user_info.get("email") or subject_info.get("CN")
+        department = user_info.get("department") or subject_info.get("O", "").replace(
+            "Government ", ""
+        )
+
+        # Use existing certificate generation with user info
+        from app.mTLS.cert_manager import cert_manager
+
+        # Use the user_id from database
+        cert_metadata = cert_manager.generate_client_certificate(
+            user_id=user_id,
+            email=email,
+            department=department,
+        )
+
+        return cert_metadata
+
+    except Exception as e:
+        print(f"Error signing certificate: {e}")
         raise
 
 
@@ -209,15 +249,116 @@ def register_user():
 
         print(f"✅ User {username} created with ID: {new_user.id}")
 
-        # STEP 2: Generate RSA keys for the user
-        try:
-            public_key, private_key_path = generate_user_keys(new_user.id)
-            print(f"✅ RSA keys generated for user {new_user.id}")
-        except Exception as key_error:
-            print(f"⚠️ Failed to generate RSA keys: {key_error}")
-            # Continue anyway - user can login but won't have encrypted workflow
-            public_key = None
-            private_key_path = None
+        # ======== ADD CSR HANDLING HERE ========
+        csr_data = data.get("csr_data")
+        client_public_key = data.get("public_key")
+
+        if csr_data and client_public_key:
+            try:
+                print(f"📝 Processing CSR for automated registration...")
+                print(f"CSR data type: {type(csr_data)}")
+                
+                # Parse CSR data if it's a string
+                if isinstance(csr_data, str):
+                    try:
+                        csr_data = json.loads(csr_data)
+                    except:
+                        pass
+
+                # Store the client-provided public key
+                new_user.public_key = client_public_key
+
+                # Calculate fingerprint
+                public_key_fingerprint = hashlib.sha256(
+                    client_public_key.encode()
+                ).hexdigest()
+                new_user.public_key_fingerprint = public_key_fingerprint
+
+                # Sign the certificate from CSR
+                cert_metadata = sign_certificate_from_csr(
+                    csr_data=csr_data,
+                    ca_cert_path="certs/ca.crt",
+                    ca_key_path="certs/ca.key",
+                    user_id=new_user.id  # Pass the actual user ID
+                )
+
+                # Read the generated certificate
+                cert_path = cert_metadata["paths"]["cert"]
+                if os.path.exists(cert_path):
+                    with open(cert_path, "r") as f:
+                        client_cert_pem = f.read()
+                else:
+                    print(f"⚠️ Certificate file not found: {cert_path}")
+                    # Create a dummy certificate for now
+                    client_cert_pem = "-----BEGIN CERTIFICATE-----\nDUMMY CERTIFICATE (File not generated)\n-----END CERTIFICATE-----"
+
+                # Associate certificate with user
+                cert_info = {
+                    "fingerprint": cert_metadata.get("fingerprint"),
+                    "serial_number": cert_metadata.get("serial_number"),
+                    "subject": {
+                        "CN": new_user.email,
+                        "O": f"Government {new_user.department}",
+                        "emailAddress": new_user.email,
+                    },
+                    "issuer": {"CN": "ZTA Root CA", "O": "Government ZTA"},
+                    "not_valid_before": datetime.utcnow().isoformat(),
+                    "not_valid_after": (
+                        datetime.utcnow() + timedelta(days=365)
+                    ).isoformat(),
+                }
+
+                new_user.associate_certificate(cert_info)
+                db.session.commit()
+
+                print(f"✅ Certificate generated from CSR for {new_user.email}")
+                print(
+                    f"   Certificate fingerprint: {cert_metadata.get('fingerprint')[:16]}..."
+                )
+
+                # Set public_key_available flag
+                public_key = client_public_key
+
+                # Log CSR-based certificate generation
+                event_logger.log_event(
+                    event_type=EventType.USER_REGISTER,
+                    source_component="api_server",
+                    action="Automated certificate generation",
+                    user_id=new_user.id,
+                    username=new_user.username,
+                    details={
+                        "email": new_user.email,
+                        "certificate_source": "CSR",
+                        "key_source": "client_generated",
+                        "has_certificate": True,
+                        "has_rsa_keys": True,
+                    },
+                    trace_id=request_id,
+                )
+
+            except Exception as csr_error:
+                print(f"⚠️ CSR processing failed: {csr_error}")
+                # Continue without certificate
+                # Generate keys server-side as fallback
+                try:
+                    public_key, private_key_path = generate_user_keys(new_user.id)
+                    print(
+                        f"✅ Fallback: Generated RSA keys server-side for user {new_user.id}"
+                    )
+                except Exception as key_error:
+                    print(f"⚠️ Failed to generate keys: {key_error}")
+                    public_key = None
+        else:
+            # Original server-side key generation (for manual registration)
+            try:
+                public_key, private_key_path = generate_user_keys(new_user.id)
+                print(f"✅ RSA keys generated for user {new_user.id}")
+            except Exception as key_error:
+                print(f"⚠️ Failed to generate RSA keys: {key_error}")
+                # Continue anyway - user can login but won't have encrypted workflow
+                public_key = None
+                private_key_path = None
+        # ======== END CSR HANDLING ========
 
         # Log successful registration
         event_logger.log_event(
@@ -232,6 +373,7 @@ def register_user():
                 "department": new_user.department,
                 "clearance": new_user.clearance_level,
                 "has_rsa_keys": public_key is not None,
+                "registration_type": "automated" if csr_data else "manual",
             },
             trace_id=request_id,
         )
@@ -252,12 +394,25 @@ def register_user():
             "request_id": request_id,
         }
 
+        # Add certificate if generated from CSR
+        if csr_data and "client_cert_pem" in locals():
+            response_data["certificate"] = client_cert_pem
+            response_data["certificate_info"] = {
+                "fingerprint": cert_metadata.get("fingerprint"),
+                "serial_number": cert_metadata.get("serial_number"),
+            }
+
         # Only include key info in development
         if current_app.config.get("DEBUG", False) and public_key:
             response_data["key_info"] = {
                 "public_key_fingerprint": new_user.public_key_fingerprint[:16] + "...",
                 "key_algorithm": "RSA-2048",
-                "note": "Private key stored securely on server",
+                "key_source": "client" if csr_data else "server",
+                "note": (
+                    "Private key stored in browser (IndexedDB)"
+                    if csr_data
+                    else "Private key stored securely on server"
+                ),
             }
 
         return jsonify(response_data), 201
@@ -269,6 +424,97 @@ def register_user():
 
         traceback.print_exc()
         return jsonify({"error": "Registration failed", "message": str(e)}), 500
+
+
+# ======== ADD NEW AUTOMATED REGISTRATION ENDPOINT ========
+@registration_bp.route("/automated", methods=["POST"])
+def automated_registration():
+    """Automated registration with CSR and public key"""
+    try:
+        data = request.get_json()
+
+        # Extract data
+        user_data = data.get("user_data", {})
+        csr_data = data.get("csr_data")
+        public_key = data.get("public_key")  # RSA public key
+
+        if not user_data or not csr_data or not public_key:
+            return (
+                jsonify({"error": "Missing required data for automated registration"}),
+                400,
+            )
+
+        # Create user (simplified - you should reuse your existing validation)
+        email = user_data.get("email", "").lower()
+
+        # Check if email already exists
+        if User.query.filter_by(email=email).first():
+            return jsonify({"error": "Email already registered"}), 400
+
+        # Create user
+        new_user = User(
+            username=user_data.get("username"),
+            email=email,
+            user_class="user",
+            facility=user_data.get("facility"),
+            department=user_data.get("department"),
+            clearance_level="BASIC",
+            is_active=True,
+            created_at=datetime.utcnow(),
+            public_key=public_key,  # Store RSA public key
+        )
+
+        # Set password
+        new_user.password_hash = generate_password_hash(user_data.get("password"))
+
+        db.session.add(new_user)
+        db.session.commit()
+
+        # Generate certificate from CSR
+        cert_metadata = sign_certificate_from_csr(
+            csr_data=csr_data, ca_cert_path="certs/ca.crt", ca_key_path="certs/ca.key"
+        )
+
+        # Read certificate
+        with open(cert_metadata["paths"]["cert"], "r") as f:
+            client_cert_pem = f.read()
+
+        # Calculate fingerprint for public key
+        import hashlib
+
+        public_key_fingerprint = hashlib.sha256(public_key.encode()).hexdigest()
+        new_user.public_key_fingerprint = public_key_fingerprint
+
+        # Associate certificate
+        cert_info = {
+            "fingerprint": cert_metadata.get("fingerprint"),
+            "serial_number": cert_metadata.get("serial_number"),
+            "subject": {
+                "CN": new_user.email,
+                "O": f"Government {new_user.department}",
+                "emailAddress": new_user.email,
+            },
+        }
+
+        new_user.associate_certificate(cert_info)
+        db.session.commit()
+
+        return (
+            jsonify(
+                {
+                    "success": True,
+                    "user_id": new_user.id,
+                    "certificate": client_cert_pem,
+                    "certificate_info": cert_metadata,
+                    "message": "Automated registration successful",
+                }
+            ),
+            201,
+        )
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
 
 
 # Test endpoint

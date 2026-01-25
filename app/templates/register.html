@@ -132,6 +132,57 @@
         margin-top: 0.5rem;
         font-size: 0.9rem;
     }
+    
+    /* Automated setup styles */
+    .automated-setup {
+        background: #f0f7ff;
+        border: 2px dashed #1a237e;
+        border-radius: 8px;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+        display: none;
+    }
+    
+    .setup-step {
+        margin: 0.75rem 0;
+        padding-left: 2rem;
+        position: relative;
+        min-height: 24px;
+        display: flex;
+        align-items: center;
+    }
+    
+    .setup-step::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        background: #e0e0e0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+    }
+    
+    .setup-step.active::before {
+        background: #1a237e;
+        color: white;
+        content: '🔄';
+    }
+    
+    .setup-step.completed::before {
+        background: #4caf50;
+        color: white;
+        content: '✓';
+    }
+    
+    .setup-step.failed::before {
+        background: #f44336;
+        color: white;
+        content: '✗';
+    }
 </style>
 {% endblock %}
 
@@ -153,6 +204,19 @@
             <p style="margin-top: 0.5rem; margin-bottom: 0; color: #333;">
                 Your facility and department will be automatically detected from your email.
             </p>
+        </div>
+        
+        <!-- Automated Security Setup Progress -->
+        <div id="automated-setup" class="automated-setup">
+            <h3 style="margin-top: 0; color: #1a237e;">🔄 Setting Up Automated Security</h3>
+            <div id="setup-steps">
+                <div class="setup-step" id="step1">Ready for registration</div>
+                <div class="setup-step" id="step2">Generating RSA keys...</div>
+                <div class="setup-step" id="step3">Creating certificate request...</div>
+                <div class="setup-step" id="step4">Setting up secure storage...</div>
+                <div class="setup-step" id="step5">Completing registration...</div>
+            </div>
+            <div id="setup-status" style="margin-top: 1rem; font-weight: bold; color: #1a237e;"></div>
         </div>
         
         <div id="alert" class="alert"></div>
@@ -224,6 +288,19 @@
             </div>
             
             <div class="form-group">
+                <div style="background: #e8f5e9; padding: 1rem; border-radius: 5px; margin-bottom: 1rem;">
+                    <input type="checkbox" id="automated_security" name="automated_security" checked>
+                    <label for="automated_security" style="display: inline; font-weight: normal;">
+                        <strong>Enable Automated Security Setup</strong><br>
+                        <small style="color: #666;">
+                            Automatically generate RSA keys and certificates in your browser.
+                            This provides enhanced security and requires no manual steps.
+                        </small>
+                    </label>
+                </div>
+            </div>
+            
+            <div class="form-group">
                 <button type="submit" class="submit-btn" id="submitBtn">
                     Create Account
                 </button>
@@ -237,11 +314,39 @@
     </div>
 </div>
 
+<!-- Load automated registration JavaScript -->
+<script src="{{ url_for('static', filename='js/zta-encryption.js') }}"></script>
+<script src="{{ url_for('static', filename='js/automated-registration.js') }}"></script>
+
 <script>
+// Simple progress indicator functions
+function updateStep(step, message, status = 'active') {
+    const element = document.getElementById(`step${step}`);
+    if (element) {
+        element.textContent = message;
+        element.className = 'setup-step ' + status;
+    }
+}
+
+function showAutomatedSetup(show) {
+    const setupDiv = document.getElementById('automated-setup');
+    if (setupDiv) {
+        setupDiv.style.display = show ? 'block' : 'none';
+    }
+}
+
+function updateStatus(message) {
+    const statusDiv = document.getElementById('setup-status');
+    if (statusDiv) {
+        statusDiv.textContent = message;
+    }
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     const form = document.getElementById('registrationForm');
     const alertDiv = document.getElementById('alert');
     const submitBtn = document.getElementById('submitBtn');
+    const automatedSecurityCheckbox = document.getElementById('automated_security');
     
     // Allowed government email domains
     const allowedDomains = ['@mod.gov', '@mof.gov', '@nsa.gov'];
@@ -281,6 +386,79 @@ document.addEventListener('DOMContentLoaded', function() {
         return null;
     }
     
+    // Handle automated registration
+    async function handleAutomatedRegistration(formData) {
+        try {
+            showAutomatedSetup(true);
+            updateStep(1, 'Initializing security setup...', 'active');
+            
+            // Initialize automated setup
+            if (!window.automatedRegistration) {
+                window.automatedRegistration = new AutomatedRegistration();
+                await window.automatedRegistration.init();
+            }
+            
+            updateStep(2, 'Generating RSA key pair...', 'active');
+            updateStatus('Generating secure RSA keys in your browser...');
+            
+            // Use automated registration
+            const result = await window.automatedRegistration.handleRegistration(formData);
+            
+            if (result.success) {
+                updateStep(5, 'Registration complete!', 'completed');
+                updateStatus('✅ Security setup complete!');
+                
+                return {
+                    success: true,
+                    user_id: result.user_id,
+                    has_certificate: result.has_certificate,
+                    message: 'Automated registration successful'
+                };
+            } else {
+                updateStep(5, 'Registration failed', 'failed');
+                updateStatus('❌ ' + result.error);
+                throw new Error(result.error);
+            }
+            
+        } catch (error) {
+            console.error('Automated registration failed:', error);
+            throw error;
+        }
+    }
+    
+    // Handle regular registration
+    async function handleRegularRegistration(formData) {
+        try {
+            console.log('Sending regular registration data:', formData);
+            
+            // Send registration request
+            const response = await fetch('/api/register/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(formData)
+            });
+            
+            console.log('Response status:', response.status);
+            const data = await response.json();
+            console.log('Response data:', data);
+            
+            if (response.ok) {
+                return {
+                    success: true,
+                    data: data
+                };
+            } else {
+                throw new Error(data.error || 'Registration failed');
+            }
+            
+        } catch (error) {
+            console.error('Registration error:', error);
+            throw error;
+        }
+    }
+    
     // Handle form submission
     form.addEventListener('submit', async function(e) {
         e.preventDefault();
@@ -290,6 +468,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const password = document.getElementById('password').value;
         const confirmPassword = document.getElementById('confirm_password').value;
         const username = document.getElementById('username').value;
+        const useAutomated = automatedSecurityCheckbox.checked;
         
         // Validate email domain
         if (!validateEmail(email)) {
@@ -317,7 +496,7 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // Disable submit button
         submitBtn.disabled = true;
-        submitBtn.textContent = 'Creating Account...';
+        submitBtn.textContent = useAutomated ? 'Setting Up Security...' : 'Creating Account...';
         
         try {
             // Get form data
@@ -329,22 +508,17 @@ document.addEventListener('DOMContentLoaded', function() {
                 employee_id: document.getElementById('employee_id').value || null
             };
             
-            console.log('Sending registration data:', formData);
+            let result;
             
-            // Send registration request
-            const response = await fetch('/api/register/', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(formData)
-            });
+            if (useAutomated) {
+                // Use automated registration with RSA keys
+                result = await handleAutomatedRegistration(formData);
+            } else {
+                // Use regular registration
+                result = await handleRegularRegistration(formData);
+            }
             
-            console.log('Response status:', response.status);
-            const data = await response.json();
-            console.log('Response data:', data);
-            
-            if (response.ok) {
+            if (result.success) {
                 showAlert('✅ Account created successfully! Redirecting to login...', 'success');
                 
                 // Show success message and redirect
@@ -358,22 +532,26 @@ You can now login with:
 • Username: ${username}
 • Email: ${email}
 
+${useAutomated ? '✓ RSA keys generated automatically\n✓ Certificate stored securely in browser' : 'Note: You may need to set up security certificates separately'}
+
 You will be redirected to the login page.
                     `);
                     window.location.href = '/';
                 }, 1500);
                 
             } else {
-                showAlert(`Error: ${data.error || 'Registration failed'}`, 'error');
+                showAlert(`Error: ${result.error || 'Registration failed'}`, 'error');
                 submitBtn.disabled = false;
                 submitBtn.textContent = 'Create Account';
+                showAutomatedSetup(false);
             }
             
         } catch (error) {
             console.error('Registration error:', error);
-            showAlert(`Network error: ${error.message}`, 'error');
+            showAlert(`Registration failed: ${error.message}`, 'error');
             submitBtn.disabled = false;
             submitBtn.textContent = 'Create Account';
+            showAutomatedSetup(false);
         }
     });
     
