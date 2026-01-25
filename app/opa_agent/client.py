@@ -85,28 +85,36 @@ class OpaAgentClient:
 
     def get_public_key(self):
         """Get OPA Agent's public key"""
+        if not self.agent_public_key:
+            print("⚠️  OPA Agent public key is None")
+            return None
+
+        print(
+            f"✅ OPA Agent public key available (length: {len(self.agent_public_key)})"
+        )
         return self.agent_public_key
 
     def health_check(self):
-        """Check if OPA Agent is healthy"""
+        """Check if OPA Agent is healthy - FIXED VERSION"""
         try:
-            response = self.session.get(f"{self.agent_url}/health", timeout=3)
+            # Check if we have a public key loaded
+            if not self.agent_public_key:
+                print("⚠️  OPA Agent: No public key loaded yet")
+                return False
 
-            if response.status_code == 200:
-                try:
-                    data = response.json()
-                    # Check if response has expected structure
-                    if isinstance(data, dict) and data.get("status") == "healthy":
-                        return True
-                    else:
-                        # Still counts if 200 OK
-                        return True
-                except:
-                    return True  # JSON parsing failed but HTTP 200
-            return False
+            # Quick HTTP check to OPA Agent
+            response = self.session.get(
+                f"{self.agent_url}/health",
+                timeout=2,
+                verify=False,  # For self-signed certs
+            )
+
+            is_healthy = response.status_code == 200
+            print(f"✅ OPA Agent health check: {'PASSED' if is_healthy else 'FAILED'}")
+            return is_healthy
 
         except Exception as e:
-            print(f"OPA Agent health check failed: {type(e).__name__}: {e}")
+            print(f"❌ OPA Agent health check error: {e}")
             return False
 
 

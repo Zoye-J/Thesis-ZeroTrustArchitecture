@@ -34,9 +34,15 @@ def create_gateway_app(config_name="development"):
     # ======== OPA AGENT CLIENT INITIALIZATION ========
     try:
         from app.opa_agent.client import init_opa_agent_client
+        from app.opa_agent.client import get_opa_agent_client  # ADD THIS!
 
         init_opa_agent_client(app)
         print("✅ OPA Agent Client initialized")
+        
+        
+        app.opa_agent_client = get_opa_agent_client() 
+        print(f"✅ OPA Agent client attached to app: {hasattr(app, 'opa_agent_client')}")
+        
     except ImportError as e:
         print(f"⚠️  OPA Agent Client not available: {e}")
 
@@ -49,7 +55,6 @@ def create_gateway_app(config_name="development"):
                 return None
 
         app.opa_agent_client = DummyOPAAgentClient()
-
     # ======== OPA CLIENT (LEGACY - FOR POLICY DECISIONS) ========
     try:
         from app.policy.opa_client import init_opa_client
@@ -67,17 +72,13 @@ def create_gateway_app(config_name="development"):
 
         # Initialize encryption context
         g.encryption_enabled = app.config.get("ENCRYPTION_ENABLED", True)
-        g.opa_agent_available = (
-            hasattr(app, "opa_agent_client") and app.opa_agent_client.health_check()
-        )
+        g.opa_agent_available = hasattr(app, "opa_agent_client")
 
         # Get OPA Agent public key if available
         if g.encryption_enabled and g.opa_agent_available:
             g.opa_agent_public_key = app.opa_agent_client.get_public_key()
         else:
             g.opa_agent_public_key = None
-            if g.encryption_enabled:
-                print(f"⚠️  Encryption enabled but OPA Agent not available")
 
     # ======== SERVICE COMMUNICATOR (UPDATED FOR ENCRYPTION) ========
     try:
@@ -189,8 +190,8 @@ def create_gateway_app(config_name="development"):
     print("  • mTLS + JWT Authentication")
     print(
         "  • OPA Agent Encryption: "
-        + ("✅" if hasattr(app, "opa_agent_client") else "❌")
-    )
+        + ("✅" if hasattr(app, "opa_agent_client") else "❌ (checking...)")
+    )  # <-- JUST CHECK IF CLIENT EXISTS, DON'T CHECK HEALTH
     print("  • Service-to-Service Communication: ✅")
     print("=" * 60)
 

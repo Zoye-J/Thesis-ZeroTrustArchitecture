@@ -643,14 +643,15 @@ subjectAltName = email:{email}
         return public_pem.decode("utf-8")
 
     def load_opa_agent_public_key(self):
-        """Load OPA Agent's public key"""
+        """Load OPA Agent's public key - GENERATE IF NOT EXISTS"""
         public_key_path = os.path.join(self.cert_dir, "opa_agent", "public.pem")
 
         if os.path.exists(public_key_path):
             with open(public_key_path, "r") as f:
                 return f.read()
 
-        # Generate if doesn't exist
+        # 🔥 CRITICAL FIX: Generate keys if they don't exist
+        print("⚠️ OPA Agent keys not found - generating now...")
         return self.generate_opa_agent_keys()
 
     def create_p12_bundle(self, user_id, p12_password):
