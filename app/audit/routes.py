@@ -190,10 +190,13 @@ def check_real_server_status():
 
 # ========== TRACE ENDPOINTS ==========
 
-@audit_bp.route("/trace/<trace_id>")
+
+@audit_bp.route("/trace/<path:trace_id>")  # Changed to <path:trace_id>
 def get_trace_api(trace_id):
-    """API endpoint to get trace details (for manual testing)"""
+    """API endpoint to get trace details"""
     try:
+        print(f"Searching for trace: {trace_id}")
+
         events = []
 
         # Search in Redis
@@ -216,7 +219,7 @@ def get_trace_api(trace_id):
                 {
                     "trace_id": trace_id,
                     "events": [],
-                    "message": "No events found",
+                    "message": "No events found for this trace ID",
                     "count": 0,
                 }
             )
@@ -243,17 +246,17 @@ def get_trace_api(trace_id):
                 "events": events,
                 "flow": flow,
                 "count": len(events),
-                "components": list(
-                    set([e.get("source_component") for e in events])
-                ),
+                "components": list(set([e.get("source_component") for e in events])),
             }
         )
 
     except Exception as e:
+        print(f"Error in trace endpoint: {e}")
         return jsonify({"error": str(e)}), 500
 
 
 # ========== OTHER ENDPOINTS ==========
+
 
 @audit_bp.route("/users/activity")
 def get_user_activity():
@@ -320,6 +323,7 @@ def get_alerts():
 
 
 # ========== SOCKETIO HANDLERS ==========
+
 
 def init_socketio_handlers(sio):
     """Initialize SocketIO event handlers"""
@@ -420,6 +424,7 @@ def init_socketio_handlers(sio):
 
 # ========== BACKGROUND UPDATES ==========
 
+
 def start_background_updates(sio):
     """Start background thread for periodic dashboard updates"""
 
@@ -450,6 +455,7 @@ def start_background_updates(sio):
 
 
 # ========== UTILITY ENDPOINTS ==========
+
 
 def get_redis_status():
     """Check Redis connection status"""

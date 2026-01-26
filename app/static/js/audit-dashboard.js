@@ -1,21 +1,86 @@
 // ZTA Audit Dashboard JavaScript - SIMPLIFIED WITH TRACE SEARCH
+
+// ========== GLOBAL FUNCTIONS (accessible from HTML onclick) ==========
+
+// Helper function for button click - MUST BE GLOBAL
+function searchTraceById() {
+    const traceId = document.getElementById('trace-input').value.trim();
+    if (traceId) {
+        searchTrace(traceId);
+    } else {
+        showNotification('Please enter a trace ID', 'warning');
+    }
+}
+
+// Notification function
+function showNotification(message, type) {
+    const notification = document.createElement('div');
+    notification.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
+    notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999;';
+    notification.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+        notification.remove();
+    }, 3000);
+}
+
+// Main trace search function - MUST BE GLOBAL
+function searchTrace(traceId) {
+    console.log(`Searching trace: ${traceId}`);
+    
+    // Show loading
+    const traceFlowDiv = document.getElementById('trace-flow');
+    traceFlowDiv.innerHTML = `
+        <div class="text-center py-4">
+            <div class="spinner-border text-primary"></div>
+            <p class="mt-2">Searching for trace: <code>${traceId}</code></p>
+        </div>
+    `;
+    
+    // Try WebSocket first if connected
+    if (window.socket && window.socket.connected) {
+        console.log('Using WebSocket for trace search');
+        window.socket.emit('request_trace', { trace_id: traceId });
+    } else {
+        // Fallback to REST API
+        console.log('Using REST API for trace search');
+        fetch(`/audit/trace/${encodeURIComponent(traceId)}`)  // Added encodeURIComponent
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                displayTraceFlow(data);
+            })
+            .catch(error => {
+                console.error('Trace search error:', error);
+                const traceFlowDiv = document.getElementById('trace-flow');
+                traceFlowDiv.innerHTML = `
+                    <div class="alert alert-danger">
+                        <h5>Error searching for trace</h5>
+                        <p>Trace ID: <code>${traceId}</code></p>
+                        <p>Error: ${error.message}</p>
+                        <small class="text-muted">Try a different trace ID or check server connection.</small>
+                    </div>
+                `;
+            });
+    }
+}
+
+// ========== DOM CONTENT LOADED ==========
+
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Dashboard loaded');
     
     // Store socket globally for trace search
     window.socket = io();
     const socket = window.socket;
-    
-
-    // Helper function for button click
-    function searchTraceById() {
-        const traceId = document.getElementById('trace-input').value.trim();
-        if (traceId) {
-            searchTrace(traceId);
-        } else {
-            showNotification('Please enter a trace ID', 'warning');
-        }
-    }
     
     // Update current time
     function updateTime() {
@@ -80,7 +145,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const traceId = this.value.trim();
             if (traceId) {
                 console.log(`Searching for trace (Enter): ${traceId}`);
-                searchTrace(traceId);
+                searchTrace(traceId);  // Call the global function
             }
         }
     });
@@ -91,68 +156,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }, 30000);
 });
 
-// Notification function
-function showNotification(message, type) {
-    const notification = document.createElement('div');
-    notification.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
-    notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999;';
-    notification.innerHTML = `
-        ${message}
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-    `;
-    document.body.appendChild(notification);
-    
-    setTimeout(() => {
-        notification.remove();
-    }, 3000);
-}
-
-// TRACE SEARCH FUNCTIONALITY
-
-// Main trace search function
-function searchTrace(traceId) {
-    console.log(`Searching trace: ${traceId}`);
-    
-    // Show loading
-    const traceFlowDiv = document.getElementById('trace-flow');
-    traceFlowDiv.innerHTML = `
-        <div class="text-center py-4">
-            <div class="spinner-border text-primary"></div>
-            <p class="mt-2">Searching for trace: <code>${traceId}</code></p>
-        </div>
-    `;
-    
-    // Try WebSocket first if connected
-    if (window.socket && window.socket.connected) {
-        console.log('Using WebSocket for trace search');
-        window.socket.emit('request_trace', { trace_id: traceId });
-    } else {
-        // Fallback to REST API
-        console.log('Using REST API for trace search');
-        fetch(`/audit/trace/${traceId}`)
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}`);
-                }
-                return response.json();
-            })
-            .then(data => {
-                displayTraceFlow(data);
-            })
-            .catch(error => {
-                console.error('Trace search error:', error);
-                const traceFlowDiv = document.getElementById('trace-flow');
-                traceFlowDiv.innerHTML = `
-                    <div class="alert alert-danger">
-                        <h5>Error searching for trace</h5>
-                        <p>Trace ID: <code>${traceId}</code></p>
-                        <p>Error: ${error.message}</p>
-                        <small class="text-muted">Try a different trace ID or check server connection.</small>
-                    </div>
-                `;
-            });
-    }
-}
+// ========== OTHER GLOBAL FUNCTIONS ==========
 
 // Display trace flow results
 function displayTraceFlow(data) {
