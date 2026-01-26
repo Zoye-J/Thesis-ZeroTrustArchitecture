@@ -2,6 +2,7 @@
 Gateway Server Flask App Factory with OPA Agent Encryption
 """
 
+import os
 from flask import Flask, render_template, redirect, url_for
 from app import jwt, cors
 from app.config import DevelopmentConfig
@@ -19,17 +20,55 @@ def create_gateway_app(config_name="development"):
 
     app.config.from_object(ConfigClass)
 
-    # ======== DISABLE SQLALCHEMY FOR GATEWAY ========
-    app.config["SQLALCHEMY_DATABASE_URI"] = None
+    # ======== DATABASE CONFIGURATION ========
+    # Use absolute path for clarity
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    db_path = os.path.join(base_dir, "instance", "government_zta.db")
+    app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{db_path}"
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+    # SQLite connection pool settings for multiple processes
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
-        "pool_pre_ping": False,
-        "pool_recycle": -1,
+        "pool_pre_ping": True,
+        "pool_recycle": 3600,  # Recycle connections every hour
+        "pool_size": 5,
+        "max_overflow": 10,
+        "connect_args": {
+            "check_same_thread": False,  # Allow multiple threads
+            "timeout": 30,  # Wait 30 seconds for lock
+        },
     }
+    print(f"📁 Database path: {db_path}")
 
     # Initialize extensions
     jwt.init_app(app)
     cors.init_app(app)
+
+    # ======== INITIALIZE DATABASE IN GATEWAY ========
+    from app.api_models import db
+    from sqlalchemy import text
+
+    db.init_app(app)
+
+    # Verify database connection WITHOUT creating tables
+    with app.app_context():
+        try:
+            # Test database connection
+            db.session.execute(text("SELECT 1"))
+            print("✅ Gateway Server: Database connection verified")
+
+            # Optional: Show table count to confirm access
+            result = db.session.execute(
+                text("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")
+            )
+            table_count = result.scalar()
+            print(f"📊 Database contains {table_count} tables")
+
+        except Exception as e:
+            print(f"❌ Gateway Server: Database connection failed: {e}")
+            print("   Make sure the API Server created the database first!")
+            # Don't exit - allow Gateway to run without database (will fail on registration)
+    # ======== END DATABASE INIT ========
 
     # ======== OPA AGENT CLIENT INITIALIZATION ========
     try:
@@ -94,6 +133,20 @@ def create_gateway_app(config_name="development"):
     from app.auth.routes import auth_bp
     from app.audit.routes import audit_bp
     from app.api.gateway_routes import gateway_bp
+
+    # ======== ADD REGISTRATION BLUEPRINT ========
+    from app.api.registration import registration_bp
+
+    app.register_blueprint(registration_bp, url_prefix="/api")
+    print("✅ Registration routes registered")
+    # ======== END ADDITION ========
+
+    # ======== REGISTER PUBLIC REGISTRATION BLUEPRINT ========
+    from app.api.public_registration import public_registration_bp
+
+    app.register_blueprint(public_registration_bp, url_prefix="/public")
+    print("✅ Public registration routes registered (NO AUTH)")
+    # ======== END PUBLIC REGISTRATION ========
 
     # Register OPA Agent routes (if available)
     try:

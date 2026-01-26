@@ -29,7 +29,7 @@ class AutomatedRegistration {
             
             // Step 3: Send registration request with CSR and public key
             console.log('Sending automated registration...');
-            const response = await fetch('https://localhost:5001/api/register/automated', {
+            const response = await fetch('/public/automated', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -40,7 +40,7 @@ class AutomatedRegistration {
                     public_key: keyPair.publicKey
                 })
             });
-            
+                        
             const result = await response.json();
             
             if (result.success) {

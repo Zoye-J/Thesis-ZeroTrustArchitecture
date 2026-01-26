@@ -37,42 +37,6 @@ def get_current_user_public_key():
         return jsonify({"error": str(e)}), 500
 
 
-@gateway_bp.route("/registration/automated", methods=["POST"])
-def handle_automated_registration():
-    """Handle automated registration - NO AUTH REQUIRED"""
-    try:
-        data = request.get_json()
-
-        # Forward to API Server
-        api_server_url = current_app.config.get(
-            "API_SERVER_URL", "https://localhost:5001"
-        )
-
-        response = requests.post(
-            f"{api_server_url}/api/registration/automated",
-            json=data,
-            headers={
-                "Content-Type": "application/json",
-                "X-Service-Token": current_app.config.get(
-                    "GATEWAY_SERVICE_TOKEN", "gateway-token-2024"
-                ),
-                "X-Request-ID": str(uuid.uuid4()),
-            },
-            timeout=10,
-            verify=False,
-        )
-
-        return jsonify(response.json()), response.status_code
-
-    except requests.exceptions.RequestException as e:
-        return (
-            jsonify({"error": "Registration service unavailable", "message": str(e)}),
-            503,
-        )
-    except Exception as e:
-        return jsonify({"error": "Registration failed", "message": str(e)}), 500
-
-
 def get_user_public_key(user_id):
     """Get user's public key from API Server"""
     try:

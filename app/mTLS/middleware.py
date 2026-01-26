@@ -60,139 +60,163 @@ def extract_public_key_from_cert(cert_pem):
         return None
 
 
-def require_authentication(f):
+def no_auth_required(f):
+    """Decorator that explicitly skips ALL authentication checks"""
+
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # Bypass ALL authentication checks
+        return f(*args, **kwargs)
+
+    return decorated_function
+
+
+def require_authentication(f=None, allow_unauthenticated=False):
     """
     Decorator that accepts EITHER mTLS OR JWT authentication
     This is the main decorator for your API endpoints
     """
 
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        # Check if mTLS is enabled in config
-        mtls_enabled = current_app.config.get("MTLS_ENABLED", True)
+    def decorator(func):
+        @wraps(func)  # FIXED: wraps(func) not wraps(f)
+        def decorated_function(*args, **kwargs):
 
-        # Try mTLS authentication first if enabled
-        if mtls_enabled:
-            cert_pem = extract_client_certificate()
+            # NEW: Check if unauthenticated access is allowed
+            if allow_unauthenticated:
+                return func(*args, **kwargs)
 
-            if cert_pem:
-                # Import here to avoid circular imports
-                from app.mTLS.cert_manager import cert_manager
+            # Check if mTLS is enabled in config
+            mtls_enabled = current_app.config.get("MTLS_ENABLED", True)
 
-                # Validate certificate
-                is_valid, result = cert_manager.validate_certificate(cert_pem)
+            # Try mTLS authentication first if enabled
+            if mtls_enabled:
+                cert_pem = extract_client_certificate()
 
-                if is_valid:
-                    # Certificate is valid
-                    cert_info = result
-
-                    # Check if revoked
-                    if cert_manager.is_certificate_revoked(
-                        cert_info.get("serial_number", "")
-                    ):
-                        return (
-                            jsonify(
-                                {
-                                    "error": "Certificate has been revoked",
-                                    "code": "CERTIFICATE_REVOKED",
-                                }
-                            ),
-                            401,
-                        )
-
-                    # Add certificate info to Flask's g object for global access
-                    g.client_certificate = cert_info
-                    g.auth_method = "mtls"
-
-                    # Extract and store public key from certificate
-                    public_key = extract_public_key_from_cert(cert_pem)
-                    if public_key:
-                        g.client_public_key = public_key
-
-                    # Try to find user in database
-                    try:
-                        from app.models.user import User
-
-                        user = User.find_by_certificate_fingerprint(
-                            cert_info.get("fingerprint")
-                        )
-                        if user:
-                            g.current_user = user
-                            user.last_certificate_auth = datetime.utcnow()
-                    except:
-                        pass  # Database might not be available
-
-                    current_app.logger.info(
-                        f"Authenticated via mTLS: {cert_info.get('subject', {}).get('emailAddress', 'Unknown')}"
-                    )
-                    return f(*args, **kwargs)
-
-        # If mTLS failed or not enabled, try JWT
-        try:
-            from flask_jwt_extended import (
-                verify_jwt_in_request,
-                get_jwt_identity,
-            )
-
-            verify_jwt_in_request(optional=True)
-            user_identity = get_jwt_identity()
-
-            if user_identity:
-                # JWT authentication successful
-                g.auth_method = "jwt"
-                g.jwt_identity = user_identity
-
-                # Try to get user's stored public key from database
-                try:
-                    from app.models.user import User
+                if cert_pem:
+                    # Import here to avoid circular imports
                     from app.mTLS.cert_manager import cert_manager
 
-                    user = User.query.get(user_identity)
-                    if user:
-                        g.current_user = user
+                    # Validate certificate
+                    is_valid, result = cert_manager.validate_certificate(cert_pem)
 
-                        # Get user's public key (from database or key storage)
-                        if user.public_key:
-                            g.client_public_key = user.public_key
-                        else:
-                            # Try to get from key storage
-                            user_public_key = cert_manager.get_user_public_key(
-                                user_id=user.id
+                    if is_valid:
+                        # Certificate is valid
+                        cert_info = result
+
+                        # Check if revoked
+                        if cert_manager.is_certificate_revoked(
+                            cert_info.get("serial_number", "")
+                        ):
+                            return (
+                                jsonify(
+                                    {
+                                        "error": "Certificate has been revoked",
+                                        "code": "CERTIFICATE_REVOKED",
+                                    }
+                                ),
+                                401,
                             )
-                            if user_public_key:
-                                g.client_public_key = user_public_key
-                except:
-                    pass
 
-                current_app.logger.info(f"Authenticated via JWT: {user_identity}")
-                return f(*args, **kwargs)
-        except:
-            pass  # JWT verification failed
+                        # Add certificate info to Flask's g object for global access
+                        g.client_certificate = cert_info
+                        g.auth_method = "mtls"
 
-        # Neither mTLS nor JWT succeeded
-        if mtls_enabled:
-            return (
-                jsonify(
-                    {
-                        "error": "Authentication required",
-                        "methods": ["mTLS (client certificate)", "JWT Bearer token"],
-                        "mtls_required": True,
-                    }
-                ),
-                401,
-            )
-        else:
-            return (
-                jsonify(
-                    {
-                        "error": "Authentication required",
-                        "methods": ["JWT Bearer token"],
-                    }
-                ),
-                401,
-            )
+                        # Extract and store public key from certificate
+                        public_key = extract_public_key_from_cert(cert_pem)
+                        if public_key:
+                            g.client_public_key = public_key
 
-    return decorated_function
+                        # Try to find user in database
+                        try:
+                            from app.models.user import User
+
+                            user = User.find_by_certificate_fingerprint(
+                                cert_info.get("fingerprint")
+                            )
+                            if user:
+                                g.current_user = user
+                                user.last_certificate_auth = datetime.utcnow()
+                        except:
+                            pass  # Database might not be available
+
+                        current_app.logger.info(
+                            f"Authenticated via mTLS: {cert_info.get('subject', {}).get('emailAddress', 'Unknown')}"
+                        )
+                        return func(*args, **kwargs)  # FIXED: func not f
+
+            # If mTLS failed or not enabled, try JWT
+            try:
+                from flask_jwt_extended import (
+                    verify_jwt_in_request,
+                    get_jwt_identity,
+                )
+
+                verify_jwt_in_request(optional=True)
+                user_identity = get_jwt_identity()
+
+                if user_identity:
+                    # JWT authentication successful
+                    g.auth_method = "jwt"
+                    g.jwt_identity = user_identity
+
+                    # Try to get user's stored public key from database
+                    try:
+                        from app.models.user import User
+                        from app.mTLS.cert_manager import cert_manager
+
+                        user = User.query.get(user_identity)
+                        if user:
+                            g.current_user = user
+
+                            # Get user's public key (from database or key storage)
+                            if user.public_key:
+                                g.client_public_key = user.public_key
+                            else:
+                                # Try to get from key storage
+                                user_public_key = cert_manager.get_user_public_key(
+                                    user_id=user.id
+                                )
+                                if user_public_key:
+                                    g.client_public_key = user_public_key
+                    except:
+                        pass
+
+                    current_app.logger.info(f"Authenticated via JWT: {user_identity}")
+                    return func(*args, **kwargs)  # FIXED: func not f
+            except:
+                pass  # JWT verification failed
+
+            # Neither mTLS nor JWT succeeded
+            if mtls_enabled:
+                return (
+                    jsonify(
+                        {
+                            "error": "Authentication required",
+                            "methods": [
+                                "mTLS (client certificate)",
+                                "JWT Bearer token",
+                            ],
+                            "mtls_required": True,
+                        }
+                    ),
+                    401,
+                )
+            else:
+                return (
+                    jsonify(
+                        {
+                            "error": "Authentication required",
+                            "methods": ["JWT Bearer token"],
+                        }
+                    ),
+                    401,
+                )
+
+        return decorated_function
+
+    if f is None:
+        return decorator
+    return decorator(f)
 
 
 def require_mtls(f):

@@ -67,11 +67,16 @@ def create_api_app(config_name="development"):
     # ======== END HEALTH ENDPOINT ========
 
     # ======== ADD MIDDLEWARE ========
-    API_SERVICE_TOKEN = app.config.get("API_SERVICE_TOKEN", "api-token-2024")
+    API_SERVICE_TOKEN = app.config.get("API_SERVICE_TOKEN", "api-token-2024-zta")
 
     @app.before_request
     def verify_service_token():
         """Middleware to verify service token from Gateway"""
+        # Allow CORS preflight OPTIONS requests
+        if request.method == "OPTIONS":
+            return
+
+        # Allow health endpoint
         if request.endpoint == "health":
             return
 

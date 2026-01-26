@@ -14,6 +14,8 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
+from app.mTLS.middleware import require_authentication
+from app.mTLS.middleware import no_auth_required
 
 registration_bp = Blueprint("registration", __name__)
 
@@ -426,11 +428,15 @@ def register_user():
         return jsonify({"error": "Registration failed", "message": str(e)}), 500
 
 
-# ======== ADD NEW AUTOMATED REGISTRATION ENDPOINT ========
 @registration_bp.route("/automated", methods=["POST"])
+@no_auth_required
 def automated_registration():
-    """Automated registration with CSR and public key"""
+    """Automated registration with CSR and public key - NO AUTH REQUIRED"""
     try:
+        print("=" * 50)
+        print("AUTOMATED REGISTRATION REQUEST")
+        print("=" * 50)
+
         data = request.get_json()
 
         # Extract data
@@ -444,44 +450,119 @@ def automated_registration():
                 400,
             )
 
-        # Create user (simplified - you should reuse your existing validation)
+        # Create user (with full validation like regular registration)
         email = user_data.get("email", "").lower()
+        username = user_data.get("username", "").lower()
+
+        # ==== DOMAIN EXTRACTION AND VALIDATION ====
+        domain_match = re.search(r"@([a-zA-Z0-9.-]+)$", email)
+        if not domain_match:
+            return jsonify({"error": "Invalid email format"}), 400
+
+        domain = domain_match.group(1)
+
+        # Check if domain is allowed
+        if domain not in DOMAIN_TO_FACILITY:
+            return (
+                jsonify(
+                    {
+                        "error": "Unauthorized email domain",
+                        "message": f'Only government email domains are allowed: {", ".join(DOMAIN_TO_FACILITY.keys())}',
+                    }
+                ),
+                400,
+            )
+
+        # Get facility and department from domain
+        facility = DOMAIN_TO_FACILITY[domain]
+        department = DOMAIN_TO_DEFAULT_DEPT[domain]
 
         # Check if email already exists
         if User.query.filter_by(email=email).first():
             return jsonify({"error": "Email already registered"}), 400
 
-        # Create user
+        # Check if username already exists
+        if User.query.filter_by(username=username).first():
+            return jsonify({"error": "Username already taken"}), 400
+
+        # Validate password strength
+        password = user_data.get("password")
+        if len(password) < 8:
+            return jsonify({"error": "Password must be at least 8 characters"}), 400
+
+        if not re.search(r"[A-Z]", password):
+            return (
+                jsonify(
+                    {"error": "Password must contain at least one uppercase letter"}
+                ),
+                400,
+            )
+
+        if not re.search(r"[a-z]", password):
+            return (
+                jsonify(
+                    {"error": "Password must contain at least one lowercase letter"}
+                ),
+                400,
+            )
+
+        if not re.search(r"\d", password):
+            return jsonify({"error": "Password must contain at least one number"}), 400
+
+        if not re.search(r'[!@#$%^&*()_+\-=\[\]{};\':"\\|,.<>\/?]', password):
+            return (
+                jsonify(
+                    {"error": "Password must contain at least one special character"}
+                ),
+                400,
+            )
+        # ==== END VALIDATION ====
+
+        print(f"Creating user via automated registration: {username}")
+        print(f"Email: {email}")
+        print(f"Facility: {facility}")
+        print(f"Department: {department}")
+
+        # Create new user
         new_user = User(
-            username=user_data.get("username"),
+            username=username,
             email=email,
             user_class="user",
-            facility=user_data.get("facility"),
-            department=user_data.get("department"),
+            facility=facility,
+            department=department,
             clearance_level="BASIC",
             is_active=True,
             created_at=datetime.utcnow(),
-            public_key=public_key,  # Store RSA public key
+            public_key=public_key,
         )
 
         # Set password
-        new_user.password_hash = generate_password_hash(user_data.get("password"))
+        new_user.set_password(password)
 
         db.session.add(new_user)
         db.session.commit()
 
+        print(f"✅ User {username} created with ID: {new_user.id}")
+
         # Generate certificate from CSR
         cert_metadata = sign_certificate_from_csr(
-            csr_data=csr_data, ca_cert_path="certs/ca.crt", ca_key_path="certs/ca.key"
+            csr_data=csr_data,
+            ca_cert_path="certs/ca.crt",
+            ca_key_path="certs/ca.key",
+            user_id=new_user.id,
         )
 
         # Read certificate
-        with open(cert_metadata["paths"]["cert"], "r") as f:
-            client_cert_pem = f.read()
+        cert_path = cert_metadata["paths"]["cert"]
+        if os.path.exists(cert_path):
+            with open(cert_path, "r") as f:
+                client_cert_pem = f.read()
+        else:
+            print(f"⚠️ Certificate file not found: {cert_path}")
+            # Fallback
+            client_cert_pem = "-----BEGIN CERTIFICATE-----\nDUMMY CERTIFICATE\n-----END CERTIFICATE-----"
 
         # Calculate fingerprint for public key
-        import hashlib
-
         public_key_fingerprint = hashlib.sha256(public_key.encode()).hexdigest()
         new_user.public_key_fingerprint = public_key_fingerprint
 
@@ -494,10 +575,15 @@ def automated_registration():
                 "O": f"Government {new_user.department}",
                 "emailAddress": new_user.email,
             },
+            "issuer": {"CN": "ZTA Root CA", "O": "Government ZTA"},
+            "not_valid_before": datetime.utcnow().isoformat(),
+            "not_valid_after": (datetime.utcnow() + timedelta(days=365)).isoformat(),
         }
 
         new_user.associate_certificate(cert_info)
         db.session.commit()
+
+        print(f"✅ Certificate generated for {new_user.email}")
 
         return (
             jsonify(
@@ -505,7 +591,10 @@ def automated_registration():
                     "success": True,
                     "user_id": new_user.id,
                     "certificate": client_cert_pem,
-                    "certificate_info": cert_metadata,
+                    "certificate_info": {
+                        "fingerprint": cert_metadata.get("fingerprint"),
+                        "serial_number": cert_metadata.get("serial_number"),
+                    },
                     "message": "Automated registration successful",
                 }
             ),
@@ -514,7 +603,11 @@ def automated_registration():
 
     except Exception as e:
         db.session.rollback()
-        return jsonify({"error": str(e)}), 500
+        print(f"Automated registration error: {str(e)}")
+        import traceback
+
+        traceback.print_exc()
+        return jsonify({"error": "Registration failed", "message": str(e)}), 500
 
 
 # Test endpoint
