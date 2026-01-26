@@ -149,12 +149,15 @@ def login():
         print(f"Login error: {e}")
 
         event_logger.log_event(
-            "LOGIN_ERROR",
-            {
+            event_type=EventType.ERROR,
+            source_component="auth_server",
+            action="Login error",
+            details={
                 "error": str(e),
                 "traceback": error_traceback[-500:] if error_traceback else None,
             },
-            request_id=request_id,
+            trace_id=request_id,
+            severity=Severity.HIGH,
         )
 
         return jsonify({"error": "Login failed", "message": str(e)}), 500
@@ -167,35 +170,47 @@ def handle_login_api_mode(username, password, request_id):
 
     if not user:
         log_request(
+            action="Login attempt",
             user_id=None,
-            endpoint="/login",
-            method="POST",
-            status="denied",
-            reason="User not found",
-            request_id=request_id,
+            details={
+                "endpoint": "/login",
+                "method": "POST",
+                "status": "denied",
+                "reason": "User not found",
+                "request_id": request_id,
+            },
+            trace_id=request_id,
         )
         return jsonify({"error": "Invalid credentials"}), 401
 
     if not user.is_active:
         log_request(
+            action="Login attempt",
             user_id=user.id,
-            endpoint="/login",
-            method="POST",
-            status="denied",
-            reason="User account inactive",
-            request_id=request_id,
+            details={
+                "endpoint": "/login",
+                "method": "POST",
+                "status": "denied",
+                "reason": "User account inactive",
+                "request_id": request_id,
+            },
+            trace_id=request_id,
         )
         return jsonify({"error": "Account is inactive"}), 401
 
     # Check password
     if not user.check_password(password):
         log_request(
+            action="Login attempt",
             user_id=user.id,
-            endpoint="/login",
-            method="POST",
-            status="denied",
-            reason="Invalid password",
-            request_id=request_id,
+            details={
+                "endpoint": "/login",
+                "method": "POST",
+                "status": "denied",
+                "reason": "Invalid password",
+                "request_id": request_id,
+            },
+            trace_id=request_id,
         )
         return jsonify({"error": "Invalid credentials"}), 401
 
@@ -220,12 +235,16 @@ def handle_login_api_mode(username, password, request_id):
         severity=Severity.INFO,
     )
     log_request(
+        action="Login attempt",
         user_id=user.id,
-        endpoint="/login",
-        method="POST",
-        status="allowed",
-        reason="Authentication successful",
-        request_id=request_id,
+        details={
+            "endpoint": "/login",
+            "method": "POST",
+            "status": "Allowed",
+            "reason": "Authentication successful",
+            "request_id": request_id,
+        },
+        trace_id=request_id,
     )
 
     return (

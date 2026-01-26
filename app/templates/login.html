@@ -95,22 +95,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
             
             // Show success
             messageDiv.innerHTML = '<div style="background: #d4edda; color: #155724; padding: 10px; border-radius: 5px; margin: 10px 0;">✅ Login successful! Redirecting...</div>';
-            
-            try {
-                await fetch('/api/auth/login-event', {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${data.access_token}`,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        username: username,
-                        timestamp: new Date().toISOString()
-                    })
-                });
-            } catch (logError) {
-                console.warn('Could not log login event:', logError);
-            }
+
             // Redirect to dashboard
             setTimeout(() => {
                 window.location.href = '/dashboard';

@@ -50,27 +50,56 @@ def dashboard():
 
 @audit_bp.route("/events")
 def get_events():
-    """Get recent events with filters"""
+    """Get recent events with filters - FIXED TO USE REDIS"""
     limit = request.args.get("limit", 100, type=int)
     event_type = request.args.get("type")
     user_id = request.args.get("user_id")
     component = request.args.get("component")
 
-    events = event_logger.get_recent_events(limit)
+    try:
+        # Try to get from Redis first
+        if event_logger.redis_client:
+            # Get today's key
+            from datetime import datetime
 
-    # Apply filters
-    filtered_events = []
-    for event in events:
-        if event_type and event.event_type != event_type:
-            continue
-        if user_id and event.user_id != user_id:
-            continue
-        if component and event.source_component != component:
-            continue
+            redis_key = f"zta_events:{datetime.utcnow().strftime('%Y%m%d')}"
 
-        filtered_events.append(event.to_dict())
+            # Get events from Redis
+            events_json = event_logger.redis_client.lrange(redis_key, 0, limit - 1)
 
-    return jsonify({"events": filtered_events, "total": len(filtered_events)})
+            events = []
+            for event_json in events_json:
+                try:
+                    event_dict = json.loads(event_json)
+                    # Convert to ZTAEvent for filtering
+                    event = ZTAEvent(**event_dict)
+                    events.append(event)
+                except Exception as e:
+                    print(f"Error parsing event from Redis: {e}")
+                    continue
+
+        else:
+            # Fallback to memory buffer
+            events = event_logger.get_recent_events(limit)
+
+        # Apply filters
+        filtered_events = []
+        for event in events:
+            if event_type and event.event_type != event_type:
+                continue
+            if user_id and event.user_id != user_id:
+                continue
+            if component and event.source_component != component:
+                continue
+
+            filtered_events.append(event.to_dict())
+
+        return jsonify({"events": filtered_events, "total": len(filtered_events)})
+
+    except Exception as e:
+        print(f"Error in get_events: {e}")
+        # Fallback to empty
+        return jsonify({"events": [], "total": 0})
 
 
 @audit_bp.route("/statistics")
@@ -307,15 +336,33 @@ def dashboard_health():
 
 @audit_bp.route("/events/recent")
 def get_recent_events_api():
-    """API endpoint for recent events (for dashboard AJAX calls)"""
+    """API endpoint for recent events (for dashboard AJAX calls) - FIXED"""
     try:
         limit = request.args.get("limit", 50, type=int)
-        events = event_logger.get_recent_events(limit)
+
+        events = []
+        # Try Redis first
+        if event_logger.redis_client:
+            from datetime import datetime
+
+            redis_key = f"zta_events:{datetime.utcnow().strftime('%Y%m%d')}"
+            events_json = event_logger.redis_client.lrange(redis_key, 0, limit - 1)
+
+            for event_json in events_json:
+                try:
+                    event_dict = json.loads(event_json)
+                    events.append(event_dict)
+                except:
+                    continue
+        else:
+            # Fallback to memory
+            events_data = event_logger.get_recent_events(limit)
+            events = [event.to_dict() for event in events_data]
 
         return jsonify(
             {
                 "success": True,
-                "events": [event.to_dict() for event in events],
+                "events": events,
                 "total": len(events),
                 "timestamp": datetime.utcnow().isoformat(),
             }
@@ -360,3 +407,38 @@ def get_filtered_events():
 def api_audit_events_recent():
     """Legacy endpoint for compatibility"""
     return get_recent_events_api()
+
+
+@audit_bp.route("/debug/redis-events")
+def debug_redis_events():
+    """Debug endpoint to see Redis events"""
+    try:
+        if not event_logger.redis_client:
+            return jsonify({"error": "Redis not connected"}), 500
+
+        # Get today's key
+        from datetime import datetime
+
+        redis_key = f"zta_events:{datetime.utcnow().strftime('%Y%m%d')}"
+
+        # Get all events
+        events = event_logger.redis_client.lrange(redis_key, 0, -1)
+
+        parsed_events = []
+        for event_json in events:
+            try:
+                parsed_events.append(json.loads(event_json))
+            except:
+                parsed_events.append({"raw": event_json[:100]})
+
+        return jsonify(
+            {
+                "redis_connected": True,
+                "redis_key": redis_key,
+                "event_count": len(events),
+                "events": parsed_events[:10],  # First 10
+            }
+        )
+
+    except Exception as e:
+        return jsonify({"redis_connected": False, "error": str(e)}), 500
