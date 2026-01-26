@@ -38,11 +38,12 @@ def create_gateway_app(config_name="development"):
 
         init_opa_agent_client(app)
         print("✅ OPA Agent Client initialized")
-        
-        
-        app.opa_agent_client = get_opa_agent_client() 
-        print(f"✅ OPA Agent client attached to app: {hasattr(app, 'opa_agent_client')}")
-        
+
+        app.opa_agent_client = get_opa_agent_client()
+        print(
+            f"✅ OPA Agent client attached to app: {hasattr(app, 'opa_agent_client')}"
+        )
+
     except ImportError as e:
         print(f"⚠️  OPA Agent Client not available: {e}")
 
@@ -105,7 +106,7 @@ def create_gateway_app(config_name="development"):
 
     app.register_blueprint(audit_bp)
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
-    app.register_blueprint(gateway_bp, url_prefix="/api")
+    app.register_blueprint(gateway_bp, url_prefix="/gateway")
 
     # ======== GATEWAY HTML ROUTES ========
     @app.route("/")

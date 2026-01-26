@@ -26,7 +26,22 @@ def create_api_app(config_name="development"):
 
     # Initialize extensions
     db.init_app(app)  # This is from api_models
-    cors.init_app(app)
+    # Enable CORS
+    cors.init_app(app, origins=["https://localhost:5000", "http://localhost:5000"])
+
+    # Handle OPTIONS requests
+    @app.after_request
+    def after_request(response):
+        response.headers.add("Access-Control-Allow-Origin", "https://localhost:5000")
+        response.headers.add(
+            "Access-Control-Allow-Headers",
+            "Content-Type, X-Service-Token, X-Request-ID, Authorization",
+        )
+        response.headers.add(
+            "Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS"
+        )
+        response.headers.add("Access-Control-Allow-Credentials", "true")
+        return response
 
     # Register API blueprints
     from app.api.api_routes import api_bp

@@ -15,7 +15,62 @@ import base64
 
 gateway_bp = Blueprint("gateway", __name__)
 
+
 # ============ HELPER FUNCTIONS ============
+@gateway_bp.route("/api/user-public-key", methods=["GET"])
+def get_current_user_public_key():
+    """Get the current user's public key (for registration) - NO AUTH REQUIRED"""
+    try:
+        # This endpoint doesn't require auth because it's used during registration
+        # when no user exists yet
+        return (
+            jsonify(
+                {
+                    "message": "This endpoint requires user authentication",
+                    "hint": "Register first, then login to get your public key",
+                    "workflow": "Register → Get RSA Keys → Login → Access encrypted endpoints",
+                }
+            ),
+            200,
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@gateway_bp.route("/registration/automated", methods=["POST"])
+def handle_automated_registration():
+    """Handle automated registration - NO AUTH REQUIRED"""
+    try:
+        data = request.get_json()
+
+        # Forward to API Server
+        api_server_url = current_app.config.get(
+            "API_SERVER_URL", "https://localhost:5001"
+        )
+
+        response = requests.post(
+            f"{api_server_url}/api/registration/automated",
+            json=data,
+            headers={
+                "Content-Type": "application/json",
+                "X-Service-Token": current_app.config.get(
+                    "GATEWAY_SERVICE_TOKEN", "gateway-token-2024"
+                ),
+                "X-Request-ID": str(uuid.uuid4()),
+            },
+            timeout=10,
+            verify=False,
+        )
+
+        return jsonify(response.json()), response.status_code
+
+    except requests.exceptions.RequestException as e:
+        return (
+            jsonify({"error": "Registration service unavailable", "message": str(e)}),
+            503,
+        )
+    except Exception as e:
+        return jsonify({"error": "Registration failed", "message": str(e)}), 500
 
 
 def get_user_public_key(user_id):
@@ -215,8 +270,36 @@ def get_opa_agent_public_key():
         return jsonify({"error": f"Failed to get public key: {str(e)}"}), 500
 
 
+@gateway_bp.route("/api/opa-agent-public-key", methods=["GET"])
+def get_opa_agent_public_key_for_clients():
+    """Get OPA Agent's public key for client-side encryption - NO AUTH"""
+    try:
+        from app.opa_agent.client import get_opa_agent_client
+
+        client = get_opa_agent_client()
+        public_key = client.get_public_key()
+
+        if not public_key:
+            return jsonify({"error": "OPA Agent public key not available"}), 503
+
+        return (
+            jsonify(
+                {
+                    "public_key": public_key,
+                    "algorithm": "RSA-OAEP-SHA256",
+                    "key_size": 2048,
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+            ),
+            200,
+        )
+
+    except Exception as e:
+        return jsonify({"error": f"Failed to get OPA Agent key: {str(e)}"}), 500
+
+
 @gateway_bp.route("/user-public-key/<int:user_id>", methods=["GET"])
-@require_authentication
+# @require_authentication
 def get_user_public_key_endpoint(user_id):  # CHANGED NAME HERE
     """Get a user's public key (for other users to encrypt messages)"""
     try:
@@ -550,7 +633,7 @@ def test_encryption():
 
 @gateway_bp.route("/register", methods=["POST"])
 def handle_registration():
-    """Handle registration - unchanged (needs RSA key generation)"""
+    """Handle registration - NO AUTH REQUIRED"""
     print(f"\n🔀 Registration request received at Gateway")
 
     try:

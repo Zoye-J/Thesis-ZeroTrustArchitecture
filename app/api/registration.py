@@ -257,7 +257,7 @@ def register_user():
             try:
                 print(f"📝 Processing CSR for automated registration...")
                 print(f"CSR data type: {type(csr_data)}")
-                
+
                 # Parse CSR data if it's a string
                 if isinstance(csr_data, str):
                     try:
@@ -279,7 +279,7 @@ def register_user():
                     csr_data=csr_data,
                     ca_cert_path="certs/ca.crt",
                     ca_key_path="certs/ca.key",
-                    user_id=new_user.id  # Pass the actual user ID
+                    user_id=new_user.id,  # Pass the actual user ID
                 )
 
                 # Read the generated certificate

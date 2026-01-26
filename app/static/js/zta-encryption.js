@@ -11,40 +11,46 @@ class ZTAEncryption {
     
     async init() {
         try {
+            console.log('Initializing ZTA encryption...');
+            
             // Initialize IndexedDB through automated setup first
             if (this.setup) {
                 await this.setup.initDB();
             }
             
-            // 1. Get OPA Agent public key
-            const agentKeyResponse = await fetch('/api/opa-agent-public-key');
-            if (!agentKeyResponse.ok) throw new Error('Failed to get OPA Agent key');
-            
-            const agentKeyData = await agentKeyResponse.json();
-            this.agentPublicKey = agentKeyData.public_key;
-            
-            // 2. Try to get user's private key from IndexedDB (not localStorage!)
-            if (this.setup) {
-                const keyPair = await this.setup.getStoredKeyPair();
-                if (keyPair && keyPair.privateKey) {
-                    this.userPrivateKey = keyPair.privateKey;
-                    this.userPublicKey = keyPair.publicKey;
-                }
-            }
-            
-            // 3. Get user's public key from server (after login) as backup
+            // 1. Get OPA Agent public key - NO AUTH REQUIRED
             try {
-                const userPublicKeyResponse = await fetch('/api/user-public-key');
-                if (userPublicKeyResponse.ok) {
-                    const userKeyData = await userPublicKeyResponse.json();
-                    this.userPublicKey = userKeyData.public_key || this.userPublicKey;
+                const agentKeyResponse = await fetch('/gateway/opa-agent-public-key');
+                if (agentKeyResponse.ok) {
+                    const agentKeyData = await agentKeyResponse.json();
+                    this.agentPublicKey = agentKeyData.public_key;
+                    console.log('OPA Agent public key loaded');
+                } else {
+                    console.warn('Could not get OPA Agent key, using fallback encryption');
                 }
-            } catch (e) {
-                // Silent fail - not logged in yet
+            } catch (error) {
+                console.warn('Failed to fetch OPA Agent key:', error);
             }
+            
+            // 2. Try to get user's private key from IndexedDB
+            if (this.setup) {
+                try {
+                    const keyPair = await this.setup.getStoredKeyPair();
+                    if (keyPair && keyPair.privateKey) {
+                        this.userPrivateKey = keyPair.privateKey;
+                        this.userPublicKey = keyPair.publicKey;
+                        console.log('User RSA keys loaded from IndexedDB');
+                    }
+                } catch (error) {
+                    console.warn('Could not load user keys:', error);
+                }
+            }
+            
+            // 3. Skip user public key from server - not needed for registration
+            // User doesn't exist yet during registration!
             
             this.initialized = true;
-            console.log('ZTA Encryption initialized');
+            console.log('✅ ZTA Encryption initialized');
             
         } catch (error) {
             console.error('Failed to initialize ZTA encryption:', error);
