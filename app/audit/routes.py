@@ -1,7 +1,3 @@
-"""
-Enhanced Audit Dashboard with Real-Time Event Streaming
-"""
-
 from flask import Blueprint, render_template, jsonify, request
 from flask_socketio import SocketIO, emit
 import json
@@ -50,69 +46,116 @@ def dashboard():
 
 @audit_bp.route("/events")
 def get_events():
-    """Get recent events with filters - FIXED TO USE REDIS"""
-    limit = request.args.get("limit", 100, type=int)
-    event_type = request.args.get("type")
-    user_id = request.args.get("user_id")
-    component = request.args.get("component")
-
+    """Get recent events WITH FILTERING"""
     try:
-        # Try to get from Redis first
+        limit = request.args.get("limit", 50, type=int)
+        event_type = request.args.get("type")
+        component = request.args.get("component")
+
+        all_events = []
+
+        # Get events from Redis
         if event_logger.redis_client:
-            # Get today's key
             from datetime import datetime
 
             redis_key = f"zta_events:{datetime.utcnow().strftime('%Y%m%d')}"
+            events_json = event_logger.redis_client.lrange(
+                redis_key, 0, limit * 2
+            )  # Get extra for filtering
 
-            # Get events from Redis
-            events_json = event_logger.redis_client.lrange(redis_key, 0, limit - 1)
-
-            events = []
             for event_json in events_json:
                 try:
-                    event_dict = json.loads(event_json)
-                    # Convert to ZTAEvent for filtering
-                    event = ZTAEvent(**event_dict)
-                    events.append(event)
-                except Exception as e:
-                    print(f"Error parsing event from Redis: {e}")
+                    event = json.loads(event_json)
+
+                    # Apply filters
+                    if event_type and event.get("event_type") != event_type:
+                        continue
+                    if component and event.get("source_component") != component:
+                        continue
+
+                    all_events.append(event)
+
+                    # Stop when we have enough filtered events
+                    if len(all_events) >= limit:
+                        break
+
+                except:
                     continue
 
-        else:
-            # Fallback to memory buffer
-            events = event_logger.get_recent_events(limit)
-
-        # Apply filters
-        filtered_events = []
-        for event in events:
-            if event_type and event.event_type != event_type:
-                continue
-            if user_id and event.user_id != user_id:
-                continue
-            if component and event.source_component != component:
-                continue
-
-            filtered_events.append(event.to_dict())
-
-        return jsonify({"events": filtered_events, "total": len(filtered_events)})
+        return jsonify(
+            {
+                "success": True,
+                "events": all_events[:limit],  # Return only up to limit
+                "total": len(all_events),
+            }
+        )
 
     except Exception as e:
-        print(f"Error in get_events: {e}")
-        # Fallback to empty
-        return jsonify({"events": [], "total": 0})
+        print(f"Events error: {e}")
+        return jsonify({"success": False, "events": [], "total": 0})
 
 
 @audit_bp.route("/statistics")
 def get_statistics():
-    """Get event statistics"""
-    stats = event_logger.get_statistics()
+    """Get SIMPLE event statistics"""
+    try:
+        # Get server status (this works)
+        server_status = check_real_server_status()
 
-    # Add active requests
-    stats["active_requests"] = len(request_tracker.active_requests)
+        # SIMPLE: Just count Redis events
+        total_events = 0
+        active_users_count = 0
 
-    stats["server_status"] = check_real_server_status()
+        if event_logger.redis_client:
+            try:
+                from datetime import datetime
 
-    return jsonify(stats)
+                redis_key = f"zta_events:{datetime.utcnow().strftime('%Y%m%d')}"
+                events_json = event_logger.redis_client.lrange(redis_key, 0, -1)
+                total_events = len(events_json)
+
+                # Count unique users (SIMPLE - just count any user_id)
+                user_ids = set()
+                for event_json in events_json[:100]:  # Check first 100 events only
+                    try:
+                        event = json.loads(event_json)
+                        user_id = event.get("user_id")
+                        if user_id:
+                            user_ids.add(str(user_id))
+                    except:
+                        continue
+
+                active_users_count = len(user_ids)
+
+            except Exception as e:
+                print(f"Simple Redis count error: {e}")
+                total_events = 0
+                active_users_count = 0
+
+        # Return SIMPLE stats
+        return jsonify(
+            {
+                "success": True,
+                "total_events": total_events,
+                "active_users": active_users_count,
+                "active_requests": 0,  # We'll skip this for now
+                "security_alerts": 0,  # We'll skip this for now
+                "server_status": server_status,
+            }
+        )
+
+    except Exception as e:
+        print(f"Simple statistics error: {e}")
+        return jsonify(
+            {
+                "success": False,
+                "total_events": 0,
+                "active_users": 0,
+                "active_requests": 0,
+                "security_alerts": 0,
+                "server_status": check_real_server_status(),
+            }
+        )
 
 
 def check_real_server_status():
@@ -145,28 +188,72 @@ def check_real_server_status():
     return status
 
 
-@audit_bp.route("/trace/<trace_id>")
-def get_trace(trace_id):
-    """Get all events for a specific trace"""
-    events = event_logger.get_events_by_trace(trace_id)
+# ========== TRACE ENDPOINTS ==========
 
-    # Reconstruct flow
-    flow = []
-    for event in events:
-        flow.append(
+@audit_bp.route("/trace/<trace_id>")
+def get_trace_api(trace_id):
+    """API endpoint to get trace details (for manual testing)"""
+    try:
+        events = []
+
+        # Search in Redis
+        if event_logger.redis_client:
+            from datetime import datetime
+
+            redis_key = f"zta_events:{datetime.utcnow().strftime('%Y%m%d')}"
+            all_events_json = event_logger.redis_client.lrange(redis_key, 0, -1)
+
+            for event_json in all_events_json:
+                try:
+                    event = json.loads(event_json)
+                    if event.get("trace_id") == trace_id:
+                        events.append(event)
+                except:
+                    continue
+
+        if not events:
+            return jsonify(
+                {
+                    "trace_id": trace_id,
+                    "events": [],
+                    "message": "No events found",
+                    "count": 0,
+                }
+            )
+
+        # Sort by timestamp
+        events.sort(key=lambda x: x.get("timestamp", ""))
+
+        # Create flow visualization
+        flow = []
+        for event in events:
+            flow.append(
+                {
+                    "timestamp": event.get("timestamp"),
+                    "component": event.get("source_component"),
+                    "event_type": event.get("event_type"),
+                    "action": event.get("action"),
+                    "status": event.get("status"),
+                }
+            )
+
+        return jsonify(
             {
-                "timestamp": event.timestamp,
-                "component": event.source_component,
-                "action": event.action,
-                "status": event.status,
-                "details": event.details,
+                "trace_id": trace_id,
+                "events": events,
+                "flow": flow,
+                "count": len(events),
+                "components": list(
+                    set([e.get("source_component") for e in events])
+                ),
             }
         )
 
-    return jsonify(
-        {"trace_id": trace_id, "events": [e.to_dict() for e in events], "flow": flow}
-    )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
+
+# ========== OTHER ENDPOINTS ==========
 
 @audit_bp.route("/users/activity")
 def get_user_activity():
@@ -232,7 +319,8 @@ def get_alerts():
     return jsonify({"alerts": alerts, "total_alerts": len(alerts)})
 
 
-# SocketIO event handlers
+# ========== SOCKETIO HANDLERS ==========
+
 def init_socketio_handlers(sio):
     """Initialize SocketIO event handlers"""
 
@@ -262,14 +350,67 @@ def init_socketio_handlers(sio):
 
     @sio.on("request_trace")
     def handle_request_trace(data):
-        """Request specific trace details"""
+        """Request specific trace details - FIXED VERSION"""
         trace_id = data.get("trace_id")
-        events = event_logger.get_events_by_trace(trace_id)
 
-        emit(
-            "trace_details",
-            {"trace_id": trace_id, "events": [e.to_dict() for e in events]},
-        )
+        if not trace_id:
+            emit("trace_details", {"error": "No trace_id provided"})
+            return
+
+        print(f"Looking for trace: {trace_id}")
+
+        try:
+            events = []
+
+            # Search in Redis first
+            if event_logger.redis_client:
+                from datetime import datetime
+
+                # Check today's events
+                redis_key = f"zta_events:{datetime.utcnow().strftime('%Y%m%d')}"
+                all_events_json = event_logger.redis_client.lrange(redis_key, 0, -1)
+
+                for event_json in all_events_json:
+                    try:
+                        event = json.loads(event_json)
+                        if event.get("trace_id") == trace_id:
+                            events.append(event)
+                    except:
+                        continue
+
+            # If not found in Redis, check memory buffer
+            if not events:
+                memory_events = event_logger.get_events_by_trace(trace_id)
+                events = [e.to_dict() for e in memory_events]
+
+            if not events:
+                emit(
+                    "trace_details",
+                    {
+                        "trace_id": trace_id,
+                        "events": [],
+                        "message": "No events found for this trace ID",
+                        "found": False,
+                    },
+                )
+                return
+
+            # Sort events by timestamp
+            events.sort(key=lambda x: x.get("timestamp", ""))
+
+            emit(
+                "trace_details",
+                {
+                    "trace_id": trace_id,
+                    "events": events,
+                    "found": True,
+                    "count": len(events),
+                },
+            )
+
+        except Exception as e:
+            print(f"Error finding trace: {e}")
+            emit("trace_details", {"error": str(e), "trace_id": trace_id})
 
     @sio.on("disconnect")
     def handle_disconnect():
@@ -277,7 +418,8 @@ def init_socketio_handlers(sio):
         print(f"Client disconnected: {request.sid}")
 
 
-# Background thread for periodic updates
+# ========== BACKGROUND UPDATES ==========
+
 def start_background_updates(sio):
     """Start background thread for periodic dashboard updates"""
 
@@ -307,6 +449,8 @@ def start_background_updates(sio):
     thread.start()
 
 
+# ========== UTILITY ENDPOINTS ==========
+
 def get_redis_status():
     """Check Redis connection status"""
     try:
@@ -320,7 +464,6 @@ def get_redis_status():
     return "disconnected"
 
 
-# Add a new route for dashboard health
 @audit_bp.route("/health")
 def dashboard_health():
     """Dashboard health endpoint"""
@@ -373,34 +516,6 @@ def get_recent_events_api():
             jsonify({"success": False, "error": str(e), "events": [], "total": 0}),
             500,
         )
-
-
-@audit_bp.route("/events")
-def get_filtered_events():
-    """Get filtered events"""
-    try:
-        limit = request.args.get("limit", 50, type=int)
-        event_type = request.args.get("type")
-        severity = request.args.get("severity")
-        component = request.args.get("component")
-
-        events = event_logger.get_recent_events(limit)
-
-        # Apply filters
-        filtered = []
-        for event in events:
-            if event_type and event.event_type != event_type:
-                continue
-            if severity and event.severity != severity:
-                continue
-            if component and event.source_component != component:
-                continue
-            filtered.append(event.to_dict())
-
-        return jsonify({"events": filtered, "total": len(filtered)})
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 
 @audit_bp.route("/api/audit/events/recent")

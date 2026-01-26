@@ -278,8 +278,8 @@
 
         <!-- Main Content -->
         <div class="row">
-            <!-- Real-Time Events -->
-            <div class="col-md-8">
+            <!-- Real-Time Events - FULL WIDTH -->
+            <div class="col-md-12">
                 <div class="card event-card">
                     <div class="card-header bg-primary text-white">
                         <i class="fas fa-stream"></i> Real-Time Events
@@ -290,18 +290,10 @@
                     </div>
                 </div>
             </div>
+        </div>
 
-            <!-- User Activity -->
-            <div class="col-md-4">
-                <div class="card event-card">
-                    <div class="card-header bg-success text-white">
-                        <i class="fas fa-user-clock"></i> Recent User Activity
-                    </div>
-                    <div class="card-body" id="user-activity">
-                        <!-- User activity will be populated here -->
-                    </div>
-                </div>
-            </div>
+        
+            
         </div>
 
         <!-- Trace Flow Visualization -->
@@ -310,18 +302,40 @@
                 <div class="card">
                     <div class="card-header bg-info text-white">
                         <i class="fas fa-project-diagram"></i> Request Flow Trace
-                        <input type="text" class="form-control form-control-sm d-inline-block w-25 float-end" 
-                               placeholder="Enter Trace ID" id="trace-input">
+                        <div class="input-group input-group-sm w-50 float-end">
+                            <input type="text" class="form-control" 
+                                placeholder="Enter Trace ID (e.g., trace_...)" 
+                                id="trace-input"
+                                list="trace-suggestions">
+                            <button class="btn btn-primary" type="button" onclick="searchTraceById()">
+                                <i class="fas fa-search"></i> Search
+                            </button>
+                        </div>
                     </div>
                     <div class="card-body">
+                        <!-- Add datalist for suggestions -->
+                        <datalist id="trace-suggestions">
+                            <option value="trace_1769458655046_b8abbda3">
+                            <option value="trace_1769447093554_2b4c9467">
+                            <option value="trace_1769447096389_ff5d2de7">
+                        </datalist>
+                        
                         <div id="trace-flow">
                             <!-- Trace flow will be shown here -->
+                            <div class="alert alert-info">
+                                <h5><i class="fas fa-info-circle"></i> How to use Trace Search:</h5>
+                                <ol class="mb-0">
+                                    <li>Click any <code>Trace: XXXXX...</code> link in events above</li>
+                                    <li>OR enter a trace ID manually (see examples in dropdown)</li>
+                                    <li>Click Search or press Enter</li>
+                                </ol>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
-
+        
         <!-- Component Status -->
         <div class="row mt-4">
             <div class="col-12">
