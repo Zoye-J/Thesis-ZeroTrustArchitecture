@@ -11,6 +11,80 @@ class Config:
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
+    # ============ BANGLADESH CONTEXT CONFIGURATION ============
+    BANGLADESH_TIMEZONE = "Asia/Dhaka"  # UTC+6
+    BANGLADESH_WORKING_HOURS = {"start": 9, "end": 17}  # 9 AM to 5 PM Bangladesh time
+
+    # Bangladesh Government Departments
+    BANGLADESH_DEPARTMENTS = {
+        "mod": {
+            "name": "Ministry of Defence",
+            "code": "mod",
+            "email_domain": "@mod.gov",
+            "clearance_levels": ["BASIC", "CONFIDENTIAL", "SECRET", "TOP_SECRET"],
+            "resource_categories": [
+                "Strategy",
+                "Operations",
+                "Budget",
+                "Personnel",
+                "Intelligence",
+                "Weapons",
+            ],
+        },
+        "mof": {
+            "name": "Ministry of Finance",
+            "code": "mof",
+            "email_domain": "@mof.gov",
+            "clearance_levels": ["BASIC", "CONFIDENTIAL", "SECRET"],
+            "resource_categories": [
+                "Budget",
+                "Finance",
+                "Tax",
+                "Policy",
+                "Procurement",
+            ],
+        },
+        "nsa": {
+            "name": "National Security Agency",
+            "code": "nsa",
+            "email_domain": "@nsa.gov",
+            "clearance_levels": ["CONFIDENTIAL", "SECRET", "TOP_SECRET"],
+            "resource_categories": [
+                "Intelligence",
+                "Security",
+                "Technology",
+                "Cyber",
+                "Surveillance",
+            ],
+        },
+    }
+
+    # Bangladesh Holidays 2024
+    BANGLADESH_HOLIDAYS = [
+        "2024-02-21",  # Language Martyrs' Day
+        "2024-03-26",  # Independence Day
+        "2024-04-14",  # Bengali New Year
+        "2024-05-01",  # May Day
+        "2024-12-16",  # Victory Day
+        "2024-12-25",  # Christmas Day
+    ]
+
+    # Bangladesh Certificate Authority Details
+    BANGLADESH_CERT_DETAILS = {
+        "country": "BD",
+        "state": "Dhaka Division",
+        "locality": "Dhaka",
+        "organization": "Government of Bangladesh",
+        "organizational_unit": "ZTA Project",
+    }
+
+    # Bangladesh Security Settings
+    BANGLADESH_IP_RANGES = {
+        "government": ["103.15.0.0/16", "203.112.0.0/16"],  # Govt IP ranges
+        "chattogram": ["103.16.0.0/16"],
+        "restricted": [],  # Add restricted IPs if needed
+    }
+
     # JWT (Only for Gateway Server)
     JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "jwt-government-secure-key-2024")
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=8)

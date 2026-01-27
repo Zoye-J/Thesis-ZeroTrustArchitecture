@@ -33,10 +33,12 @@ DOMAIN_TO_DEFAULT_DEPT = {
 }
 
 
+# IN app/api/public_registration.py - UPDATE THIS FUNCTION:
+
+
 def sign_certificate_from_csr(csr_data, ca_cert_path, ca_key_path, user_id):
-    """Sign a certificate from CSR data"""
+    """Sign a certificate from CSR data with BANGLADESH context"""
     try:
-        # csr_data might be JSON string, parse if needed
         if isinstance(csr_data, str):
             csr_data = json.loads(csr_data)
 
@@ -48,14 +50,25 @@ def sign_certificate_from_csr(csr_data, ca_cert_path, ca_key_path, user_id):
             "Government ", ""
         )
 
-        # Use existing certificate generation with user info
+        # Get domain from email
+        domain_match = re.search(r"@([a-zA-Z0-9.-]+)$", email)
+        if domain_match:
+            domain = domain_match.group(1)
+            department_code = {
+                "mod.gov": "mod",
+                "mof.gov": "mof",
+                "nsa.gov": "nsa",
+            }.get(
+                domain, "mod"
+            )  # default to mod
+
         from app.mTLS.cert_manager import cert_manager
 
-        # Use the user_id from database
+        # Pass department_code instead of department name
         cert_metadata = cert_manager.generate_client_certificate(
             user_id=user_id,
             email=email,
-            department=department,
+            department_code=department_code,
         )
 
         return cert_metadata

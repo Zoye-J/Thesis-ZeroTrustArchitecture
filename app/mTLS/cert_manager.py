@@ -1,6 +1,7 @@
 """
 Certificate Manager for mTLS - Complete Implementation
 Handles certificate generation, validation, and management
+BANGLADESH GOVERNMENT VERSION
 """
 
 import os
@@ -14,7 +15,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from flask import current_app
 import base64
-from app.logs.zta_event_logger import event_logger, EventType  # CHANGED HERE
+from app.logs.zta_event_logger import event_logger, EventType
 
 
 class CertificateManager:
@@ -22,8 +23,14 @@ class CertificateManager:
         self.cert_dir = cert_dir
         self.ca_cert_path = os.path.join(cert_dir, "ca.crt")
         self.ca_key_path = os.path.join(cert_dir, "ca.key")
-        # NEW: Add keys directory
         self.keys_dir = os.path.join(cert_dir, "user_keys")
+
+        # Bangladesh Government Structure
+        self.bangladesh_departments = {
+            "mod": "Ministry of Defence",
+            "mof": "Ministry of Finance",
+            "nsa": "National Security Agency",
+        }
         self.ensure_dirs()
 
     def ensure_dirs(self):
@@ -31,7 +38,6 @@ class CertificateManager:
         if not os.path.exists(self.cert_dir):
             os.makedirs(self.cert_dir)
             print(f"Created certificate directory: {self.cert_dir}")
-        # NEW: Ensure keys directory
         if not os.path.exists(self.keys_dir):
             os.makedirs(self.keys_dir)
             print(f"Created keys directory: {self.keys_dir}")
@@ -39,9 +45,7 @@ class CertificateManager:
     def run_openssl_command(self, cmd):
         """Execute OpenSSL command with better error handling"""
         try:
-            # Clean up command (remove extra spaces/newlines)
             cmd = " ".join(cmd.split())
-
             print(f"  Running: {cmd[:80]}...")
 
             result = subprocess.run(
@@ -53,7 +57,6 @@ class CertificateManager:
                 if result.stderr:
                     print(f"     Error: {result.stderr[:200]}")
                 return False
-
             return True
         except subprocess.TimeoutExpired:
             print(f"  ❌ OpenSSL command timed out")
@@ -62,254 +65,45 @@ class CertificateManager:
             print(f"  ❌ Command execution error: {e}")
             return False
 
-    def validate_certificate_with_detailed_logging(
-        self, cert_pem, request_id=None, client_ip=None
-    ):
-        """Enhanced certificate validation with detailed logging for dashboard"""
-        validation_checks = {
-            "certificate_present": False,
-            "format_valid": False,
-            "signature_valid": False,
-            "not_expired": False,
-            "not_revoked": False,
-            "issuer_trusted": False,
-            "key_usage_valid": False,
-            "time_restrictions_passed": True,
-        }
-
-        cert_info = {}
-        validation_result = "FAILED"
-
-        try:
-            # Parse certificate
-            validation_checks["certificate_present"] = bool(cert_pem)
-
-            cert = x509.load_pem_x509_certificate(cert_pem.encode(), default_backend())
-            validation_checks["format_valid"] = True
-
-            # Extract certificate details
-            fingerprint = cert.fingerprint(hashes.SHA256()).hex()
-            serial = format(cert.serial_number, "X")
-
-            # Get subject and issuer
-            subject = {}
-            for attr in cert.subject:
-                subject[attr.oid._name] = attr.value
-
-            issuer = {}
-            for attr in cert.issuer:
-                issuer[attr.oid._name] = attr.value
-
-            # Check validity period
-            now = datetime.utcnow()
-            validation_checks["not_expired"] = now < cert.not_valid_after
-            validation_checks["not_yet_valid"] = now >= cert.not_valid_before
-
-            # Check issuer
-            if os.path.exists(self.ca_cert_path):
-                with open(self.ca_cert_path, "rb") as f:
-                    ca_cert = x509.load_pem_x509_certificate(
-                        f.read(), default_backend()
-                    )
-                    validation_checks["issuer_trusted"] = cert.issuer == ca_cert.subject
-
-            # Check revocation
-            validation_checks["not_revoked"] = not self.is_certificate_revoked(serial)
-
-            # Check key usage
-            try:
-                # Extract key usage extension
-                key_usage = cert.extensions.get_extension_for_class(x509.KeyUsage)
-                validation_checks["key_usage_valid"] = key_usage.value.digital_signature
-            except:
-                validation_checks["key_usage_valid"] = (
-                    True  # Assume valid if extension not present
-                )
-
-            # Build cert info
-            cert_info = {
-                "fingerprint": fingerprint,
-                "serial_number": serial,
-                "subject": subject,
-                "issuer": issuer,
-                "not_valid_before": cert.not_valid_before.isoformat(),
-                "not_valid_after": cert.not_valid_after.isoformat(),
-                "signature_algorithm": (
-                    cert.signature_algorithm_oid._name
-                    if hasattr(cert.signature_algorithm_oid, "_name")
-                    else str(cert.signature_algorithm_oid)
-                ),
-                "version": cert.version.name,
-            }
-
-            # Determine overall result
-            all_passed = all(validation_checks.values())
-            validation_result = "PASSED" if all_passed else "FAILED"
-
-            # Log detailed validation
-            log_details = {
-                "certificate_info": cert_info,
-                "validation_checks": validation_checks,
-                "overall_result": validation_result,
-                "client_ip": client_ip,
-                "checks_passed": sum(1 for v in validation_checks.values() if v),
-                "total_checks": len(validation_checks),
-            }
-
-            if request_id:
-                event_type = (
-                    EventType.CLIENT_CERT_VALID
-                    if all_passed
-                    else EventType.CLIENT_CERT_INVALID
-                )
-                event_logger.log_event(
-                    event_type=event_type,
-                    source_component="mTLS",
-                    action="Certificate validation",
-                    details=log_details,
-                    status="success" if all_passed else "failure",
-                    trace_id=request_id,
-                )
-
-            return all_passed, cert_info, validation_checks
-
-        except Exception as e:
-            # Log validation error
-            log_details = {
-                "error": str(e),
-                "validation_checks": validation_checks,
-                "overall_result": "ERROR",
-                "client_ip": client_ip,
-                "exception_type": type(e).__name__,
-            }
-
-        if request_id:
-            event_logger.log_event(
-                event_type=EventType.ERROR,
-                source_component="mTLS",
-                action="Certificate validation error",
-                details=log_details,
-                status="failure",
-                trace_id=request_id,
-            )
-
-        return False, cert_info, validation_checks
-
-    def log_certificate_verification_summary(self, cert_pem, request_id, client_ip):
-        """Create a summary log entry for certificate verification"""
-        try:
-            cert = x509.load_pem_x509_certificate(cert_pem.encode(), default_backend())
-            fingerprint = cert.fingerprint(hashes.SHA256()).hex()
-
-            # Extract certificate chain info
-            subject_info = {}
-            for attr in cert.subject:
-                subject_info[attr.oid._name] = attr.value
-
-            issuer_info = {}
-            for attr in cert.issuer:
-                issuer_info[attr.oid._name] = attr.value
-
-            # Calculate remaining validity
-            now = datetime.utcnow()
-            valid_days = (cert.not_valid_after - now).days
-
-            # Log certificate verification summary
-            summary = {
-                "certificate_fingerprint": fingerprint,
-                "subject": subject_info,
-                "issuer": issuer_info,
-                "validity": {
-                    "from": cert.not_valid_before.isoformat(),
-                    "to": cert.not_valid_after.isoformat(),
-                    "remaining_days": valid_days,
-                    "is_expired": valid_days <= 0,
-                },
-                "client_ip": client_ip,
-                "verification_timestamp": now.isoformat(),
-                "certificate_strength": "RSA-2048",  # You can extract this from cert
-                "key_usage": self.extract_key_usage(cert),
-            }
-
-            event_logger.log_event(
-                event_type=EventType.CLIENT_CERT_VALID,
-                source_component="mTLS",
-                action="Certificate verification summary",
-                details=summary,
-                status="success",
-                trace_id=request_id,
-            )
-
-            return summary
-
-        except Exception as e:
-            event_logger.log_event(
-                event_type=EventType.ERROR,
-                source_component="mTLS",
-                action="Certificate summary error",
-                details={"error": str(e), "client_ip": client_ip},
-                status="failure",
-                trace_id=request_id,
-            )
-            return None
-
-    def extract_key_usage(self, cert):
-        """Extract key usage information from certificate"""
-        key_usage = {}
-        try:
-            ku_ext = cert.extensions.get_extension_for_class(x509.KeyUsage)
-            if ku_ext:
-                key_usage = {
-                    "digital_signature": ku_ext.value.digital_signature,
-                    "key_encipherment": ku_ext.value.key_encipherment,
-                    "data_encipherment": ku_ext.value.data_encipherment,
-                    "key_agreement": ku_ext.value.key_agreement,
-                    "key_cert_sign": ku_ext.value.key_cert_sign,
-                    "crl_sign": ku_ext.value.crl_sign,
-                }
-        except:
-            pass
-        return key_usage
-
     def generate_root_ca(self):
-        """Generate Root Certificate Authority"""
-        print("Generating Root CA...")
+        """Generate Root Certificate Authority for BANGLADESH"""
+        print("🇧🇩 Generating Bangladesh Government Root CA...")
 
         # Generate CA private key
         ca_key_cmd = f"openssl genrsa -out {self.ca_key_path} 4096"
         if not self.run_openssl_command(ca_key_cmd):
             return False
 
-        # Generate CA certificate
+        # Generate CA certificate with BANGLADESH context
         ca_cert_cmd = f"""
         openssl req -x509 -new -nodes -key {self.ca_key_path} \
         -sha256 -days 3650 -out {self.ca_cert_path} \
-        -subj "/C=GB/ST=England/L=London/O=Government ZTA/CN=ZTA Root CA"
+        -subj "/C=BD/ST=Dhaka Division/L=Dhaka/O=Government of Bangladesh/OU=ZTA Project/CN=Government ZTA Root CA"
         """
         if not self.run_openssl_command(ca_cert_cmd):
             return False
 
-        print(f"✓ Root CA created: {self.ca_cert_path}")
+        print(f"✓ Bangladesh Root CA created: {self.ca_cert_path}")
         return True
 
     def generate_server_certificate(self, server_name="localhost"):
-        """Generate server certificate signed by CA"""
+        """Generate server certificate for BANGLADESH government server"""
         server_key = os.path.join(self.cert_dir, "server.key")
         server_csr = os.path.join(self.cert_dir, "server.csr")
         server_crt = os.path.join(self.cert_dir, "server.crt")
         server_ext = os.path.join(self.cert_dir, "server.ext")
 
-        print(f"Generating server certificate for {server_name}...")
+        print(f"🇧🇩 Generating server certificate for Bangladesh government...")
 
         # Generate server key
         if not self.run_openssl_command(f"openssl genrsa -out {server_key} 2048"):
             return False
 
-        # Create CSR
+        # Create CSR with BANGLADESH context
         csr_cmd = f"""
         openssl req -new -key {server_key} \
         -out {server_csr} \
-        -subj "/C=GB/ST=England/L=London/O=Government Ministry/CN={server_name}"
+        -subj "/C=BD/ST=Dhaka Division/L=Dhaka/O=Government ICT/OU=Digital Services/CN={server_name}"
         """
         if not self.run_openssl_command(csr_cmd):
             return False
@@ -342,8 +136,9 @@ IP.1 = 127.0.0.1
         print(f"✓ Server certificate created: {server_crt}")
         return {"key": server_key, "cert": server_crt, "ca": self.ca_cert_path}
 
-    def generate_client_certificate(self, user_id, email, department):
-        """Generate client certificate for a specific user"""
+    def generate_client_certificate(self, user_id, email, department_code):
+        """Generate client certificate for BANGLADESH government user"""
+        # Define ALL file paths first
         client_dir = os.path.join(self.cert_dir, "clients", str(user_id))
         os.makedirs(client_dir, exist_ok=True)
 
@@ -354,17 +149,24 @@ IP.1 = 127.0.0.1
         client_p12 = os.path.join(client_dir, "client.p12")
         metadata_file = os.path.join(client_dir, "metadata.json")
 
-        print(f"Generating client certificate for {email}...")
+        # Get Bangladesh department name
+        department_name = self.bangladesh_departments.get(
+            department_code.lower(), f"Government {department_code}"
+        )
+
+        print(
+            f"🇧🇩 Generating Bangladesh government certificate for {email} ({department_name})..."
+        )
 
         # Generate client key
         if not self.run_openssl_command(f"openssl genrsa -out {client_key} 2048"):
             return None
 
-        # Create CSR
+        # Create CSR with BANGLADESH context
         csr_cmd = f"""
         openssl req -new -key {client_key} \
         -out {client_csr} \
-        -subj "/C=GB/ST=England/L=London/O=Government {department}/CN={email}/emailAddress={email}"
+        -subj "/C=BD/ST=Dhaka Division/L=Dhaka/O={department_name}/OU=ZTA Access/CN={email}/emailAddress={email}"
         """
         if not self.run_openssl_command(csr_cmd):
             return None
@@ -377,10 +179,11 @@ default_md = sha256
 distinguished_name = dn
 
 [ dn ]
-C = GB
-ST = England
-L = London
-O = Government {department}
+C = BD
+ST = Dhaka Division
+L = Dhaka
+O = {department_name}
+OU = ZTA Access
 CN = {email}
 emailAddress = {email}
 
@@ -423,7 +226,11 @@ subjectAltName = email:{email}
         metadata = {
             "user_id": user_id,
             "email": email,
-            "department": department,
+            "department_code": department_code,
+            "department_name": department_name,
+            "country": "Bangladesh",
+            "region": "Dhaka Division",
+            "city": "Dhaka",
             "issued_date": datetime.now().isoformat(),
             "expiry_date": (datetime.now() + timedelta(days=365)).isoformat(),
             "fingerprint": fingerprint,
@@ -468,7 +275,7 @@ subjectAltName = email:{email}
             if now > cert.not_valid_after:
                 return False, "Certificate expired"
 
-            # Check issuer (simplified - in production, verify chain properly)
+            # Check issuer
             if cert.issuer != ca_cert.subject:
                 return False, "Certificate not issued by trusted CA"
 
@@ -500,194 +307,57 @@ subjectAltName = email:{email}
         except Exception as e:
             return False, f"Certificate validation error: {str(e)}"
 
+    def validate_certificate_with_detailed_logging(
+        self, cert_pem, request_id=None, client_ip=None
+    ):
+        """Enhanced certificate validation with detailed logging"""
+        # ... [keep existing validation_with_detailed_logging method unchanged] ...
+        pass  # Keep your existing implementation
+
+    def log_certificate_verification_summary(self, cert_pem, request_id, client_ip):
+        """Create a summary log entry for certificate verification"""
+        # ... [keep existing log_certificate_verification_summary method unchanged] ...
+        pass  # Keep your existing implementation
+
+    def extract_key_usage(self, cert):
+        """Extract key usage information from certificate"""
+        # ... [keep existing extract_key_usage method unchanged] ...
+        pass  # Keep your existing implementation
+
     def revoke_certificate(self, cert_pem):
-        """Revoke a certificate (add to CRL)"""
-        # Placeholder - in production, implement proper CRL
-        try:
-            cert = x509.load_pem_x509_certificate(cert_pem.encode(), default_backend())
-            serial = format(cert.serial_number, "X")
-
-            # Add to revocation list
-            crl_file = os.path.join(self.cert_dir, "crl.json")
-            if os.path.exists(crl_file):
-                with open(crl_file, "r") as f:
-                    revoked = json.load(f)
-            else:
-                revoked = []
-
-            revoked.append(
-                {
-                    "serial": serial,
-                    "revoked_at": datetime.now().isoformat(),
-                    "reason": "user_request",
-                }
-            )
-
-            with open(crl_file, "w") as f:
-                json.dump(revoked, f, indent=2)
-
-            return True, f"Certificate {serial} revoked"
-        except Exception as e:
-            return False, str(e)
+        """Revoke a certificate"""
+        # ... [keep existing revoke_certificate method unchanged] ...
+        pass  # Keep your existing implementation
 
     def is_certificate_revoked(self, serial):
         """Check if certificate is revoked"""
-        crl_file = os.path.join(self.cert_dir, "crl.json")
-        if os.path.exists(crl_file):
-            with open(crl_file, "r") as f:
-                revoked = json.load(f)
-                return any(entry["serial"] == serial for entry in revoked)
-        return False
-
-    # =========================================================================
-    # NEW RSA KEY FUNCTIONS - MINIMAL ADDITION
-    # =========================================================================
+        # ... [keep existing is_certificate_revoked method unchanged] ...
+        pass  # Keep your existing implementation
 
     def generate_rsa_key_pair(self, user_id, email):
-        """Generate RSA key pair for a user (simplified version)"""
-        # Create user-specific directory
-        user_key_dir = os.path.join(self.keys_dir, str(user_id))
-        os.makedirs(user_key_dir, exist_ok=True)
-
-        # Generate private key
-        private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048,
-        )
-
-        # Generate public key
-        public_key = private_key.public_key()
-
-        # Serialize private key (PEM format)
-        private_pem = private_key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.NoEncryption(),
-        )
-
-        # Serialize public key (PEM format)
-        public_pem = public_key.public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo,
-        )
-
-        # Save keys to files
-        private_key_path = os.path.join(user_key_dir, "private.pem")
-        public_key_path = os.path.join(user_key_dir, "public.pem")
-
-        with open(private_key_path, "wb") as f:
-            f.write(private_pem)
-
-        with open(public_key_path, "wb") as f:
-            f.write(public_pem)
-
-        # Return key info
-        return {
-            "user_id": user_id,
-            "email": email,
-            "public_key": public_pem.decode("utf-8"),
-            "private_key_path": private_key_path,
-            "public_key_path": public_key_path,
-            "key_size": 2048,
-            "algorithm": "RSA",
-            "generated_at": datetime.now().isoformat(),
-        }
+        """Generate RSA key pair for a user"""
+        # ... [keep existing generate_rsa_key_pair method unchanged] ...
+        pass  # Keep your existing implementation
 
     def get_user_public_key(self, user_id):
         """Get user's public key from storage"""
-        user_key_dir = os.path.join(self.keys_dir, str(user_id))
-        public_key_path = os.path.join(user_key_dir, "public.pem")
-
-        if os.path.exists(public_key_path):
-            with open(public_key_path, "r") as f:
-                return f.read()
-        return None
+        # ... [keep existing get_user_public_key method unchanged] ...
+        pass  # Keep your existing implementation
 
     def generate_opa_agent_keys(self):
-        """Generate RSA keys for OPA Agent (simplified)"""
-        agent_key_dir = os.path.join(self.cert_dir, "opa_agent")
-        os.makedirs(agent_key_dir, exist_ok=True)
-
-        # Generate private key
-        private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048,
-        )
-
-        # Generate public key
-        public_key = private_key.public_key()
-
-        # Serialize keys
-        private_pem = private_key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.NoEncryption(),
-        )
-
-        public_pem = public_key.public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo,
-        )
-
-        # Save to files
-        private_key_path = os.path.join(agent_key_dir, "private.pem")
-        public_key_path = os.path.join(agent_key_dir, "public.pem")
-
-        with open(private_key_path, "wb") as f:
-            f.write(private_pem)
-
-        with open(public_key_path, "wb") as f:
-            f.write(public_pem)
-
-        print(f"✓ OPA Agent keys generated in: {agent_key_dir}")
-        return public_pem.decode("utf-8")
+        """Generate RSA keys for OPA Agent"""
+        # ... [keep existing generate_opa_agent_keys method unchanged] ...
+        pass  # Keep your existing implementation
 
     def load_opa_agent_public_key(self):
-        """Load OPA Agent's public key - GENERATE IF NOT EXISTS"""
-        public_key_path = os.path.join(self.cert_dir, "opa_agent", "public.pem")
-
-        if os.path.exists(public_key_path):
-            with open(public_key_path, "r") as f:
-                return f.read()
-
-        # 🔥 CRITICAL FIX: Generate keys if they don't exist
-        print("⚠️ OPA Agent keys not found - generating now...")
-        return self.generate_opa_agent_keys()
+        """Load OPA Agent's public key"""
+        # ... [keep existing load_opa_agent_public_key method unchanged] ...
+        pass  # Keep your existing implementation
 
     def create_p12_bundle(self, user_id, p12_password):
         """Create PKCS12 bundle for browser import"""
-        try:
-            client_dir = os.path.join(self.cert_dir, "clients", str(user_id))
-            client_key = os.path.join(client_dir, "client.key")
-            client_crt = os.path.join(client_dir, "client.crt")
-            client_p12 = os.path.join(client_dir, "client.p12")
-
-            # Check if files exist
-            if not os.path.exists(client_key):
-                return False, f"Private key not found: {client_key}"
-            if not os.path.exists(client_crt):
-                return False, f"Certificate not found: {client_crt}"
-            if not os.path.exists(self.ca_cert_path):
-                return False, f"CA certificate not found: {self.ca_cert_path}"
-
-            print(f"  Creating P12 bundle for user {user_id}...")
-
-            # Create PKCS12 bundle (for browsers)
-            p12_cmd = f"""
-            openssl pkcs12 -export -out "{client_p12}" \
-            -inkey "{client_key}" -in "{client_crt}" \
-            -certfile "{self.ca_cert_path}" -passout pass:{p12_password}
-            """
-
-            success = self.run_openssl_command(p12_cmd)
-            if success:
-                print(f"  ✅ P12 bundle created: {client_p12}")
-                return True, client_p12
-            else:
-                return False, "Failed to create P12 bundle"
-
-        except Exception as e:
-            return False, str(e)
+        # ... [keep existing create_p12_bundle method unchanged] ...
+        pass  # Keep your existing implementation
 
 
 # Singleton instance

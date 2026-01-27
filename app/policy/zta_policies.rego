@@ -5,9 +5,8 @@ import future.keywords
 # ZTA Core Policies
 default allow := false
 
-#############################################
-# AUTHENTICATION TIER SYSTEM
-#############################################
+import data.zta.bangladesh  # Bangladesh context
+
 
 # Authentication tiers (3 = strongest)
 auth_tier := tier {
@@ -163,17 +162,20 @@ department_resources := {
     "Ministry of Defence": {
         "departments": ["Operations", "Intelligence", "Logistics", "Personnel"],
         "categories": ["Strategy", "Operations", "Budget", "Personnel", "Intelligence", "Weapons"],
-        "allowed_facilities": ["Ministry of Defence", "National Security Agency"]  # MOD can access some NSA docs
+        "allowed_facilities": ["Ministry of Defence", "National Security Agency"],
+        "bangladesh_code": "mod"
     },
     "Ministry of Finance": {
         "departments": ["Budget", "Taxation", "Treasury", "Audit"],
         "categories": ["Budget", "Finance", "Tax", "Policy", "Procurement"],
-        "allowed_facilities": ["Ministry of Finance"]
+        "allowed_facilities": ["Ministry of Finance"],
+        "bangladesh_code": "mof"
     },
     "National Security Agency": {
         "departments": ["Cyber Security", "Intelligence", "Counter-Terrorism", "Surveillance"],
         "categories": ["Intelligence", "Security", "Technology", "Cyber", "Surveillance"],
-        "allowed_facilities": ["National Security Agency", "Ministry of Defence"]  # NSA can access some MOD docs
+        "allowed_facilities": ["National Security Agency", "Ministry of Defence"],
+        "bangladesh_code": "nsa"
     }
 }
 
@@ -210,11 +212,8 @@ clearance_hierarchy := ["BASIC", "CONFIDENTIAL", "SECRET", "TOP_SECRET"]
 
 # Check if user has sufficient clearance
 clearance_allowed {
-    # Get indices in hierarchy
-    user_index := {i | clearance_hierarchy[i] == input.user.clearance}
-    resource_index := {i | clearance_hierarchy[i] == input.resource.classification}
-    
-    # User clearance must be >= resource clearance
+    user_index := {i | zta.bangladesh.bangladesh_clearance_hierarchy[i] == input.user.clearance}
+    resource_index := {i | zta.bangladesh.bangladesh_clearance_hierarchy[i] == input.resource.classification}
     user_index[_] >= resource_index[_]
 }
 
@@ -229,12 +228,24 @@ is_business_hour {
     hour < 21
 }
 
+
+
+#Bangladesh holiday check
+holiday_access_allowed {
+    not zta.bangladesh.is_bangladesh_holiday
+} else = true {
+    # Allow access on holidays only for non-TOP_SECRET documents
+    input.resource.classification != "TOP_SECRET"
+}
+
+
+
 # TOP_SECRET documents require business hours
 top_secret_time_allowed {
     input.resource.classification != "TOP_SECRET"
 } else {
     input.resource.classification == "TOP_SECRET"
-    is_business_hour
+    zta.bangladesh.allow_access_time_based  # Use Bangladesh context
 }
 
 #############################################
@@ -293,6 +304,9 @@ allow {
     
     # 5. Action is allowed for user role
     action_allowed
+
+    # 6. Holiday access allowed
+    holiday_access_allowed
 }
 
 # Action-specific rules
