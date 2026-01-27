@@ -1,4 +1,4 @@
-# create_sample_resources.py - UPDATED
+# create_sample_resources.py - FIXED VERSION
 import sys
 import os
 
@@ -15,11 +15,21 @@ from datetime import datetime
 app = create_api_app("development")
 
 with app.app_context():
-    # Find an admin user to own the resources
-    admin = User.query.filter_by(user_class="admin").first()
-    if not admin:
-        print("No admin user found. Please create an admin user first.")
+    # Find ANY existing user to own the resources (not necessarily admin)
+    # Priority: admin > superadmin > any user
+    user = User.query.filter_by(user_class="admin").first()
+    if not user:
+        user = User.query.filter_by(user_class="superadmin").first()
+    if not user:
+        user = User.query.first()  # Any user
+
+    if not user:
+        print("❌ No users found in database!")
+        print("Please create users first (register some users)")
         exit(1)
+
+    print(f"✅ Using user as owner: {user.username} ({user.email})")
+    print(f"   Department: {user.department}, Role: {user.user_class}")
 
     sample_resources = [
         # PUBLIC resources (all departments can see)
@@ -32,8 +42,8 @@ with app.app_context():
             "facility": "Government HQ",
             "department": "GENERAL",
             "category": "Reports",
-            "owner_id": admin.id,
-            "created_by": admin.id,
+            "owner_id": user.id,
+            "created_by": user.id,
         },
         {
             "document_id": "GOV-PUB-002",
@@ -44,8 +54,8 @@ with app.app_context():
             "facility": "Government HQ",
             "department": "GENERAL",
             "category": "Announcements",
-            "owner_id": admin.id,
-            "created_by": admin.id,
+            "owner_id": user.id,
+            "created_by": user.id,
         },
         # MOD Department resources
         {
@@ -57,8 +67,8 @@ with app.app_context():
             "facility": "Ministry of Defence",
             "department": "MOD",
             "category": "Military",
-            "owner_id": admin.id,
-            "created_by": admin.id,
+            "owner_id": user.id,
+            "created_by": user.id,
         },
         {
             "document_id": "MOD-DEP-002",
@@ -69,8 +79,8 @@ with app.app_context():
             "facility": "Ministry of Defence",
             "department": "MOD",
             "category": "Budget",
-            "owner_id": admin.id,
-            "created_by": admin.id,
+            "owner_id": user.id,
+            "created_by": user.id,
         },
         # MOF Department resources
         {
@@ -82,8 +92,8 @@ with app.app_context():
             "facility": "Ministry of Finance",
             "department": "MOF",
             "category": "Budget",
-            "owner_id": admin.id,
-            "created_by": admin.id,
+            "owner_id": user.id,
+            "created_by": user.id,
         },
         {
             "document_id": "MOF-DEP-002",
@@ -94,8 +104,8 @@ with app.app_context():
             "facility": "Ministry of Finance",
             "department": "MOF",
             "category": "Finance",
-            "owner_id": admin.id,
-            "created_by": admin.id,
+            "owner_id": user.id,
+            "created_by": user.id,
         },
         # NSA Department resources
         {
@@ -107,8 +117,8 @@ with app.app_context():
             "facility": "National Security Agency",
             "department": "NSA",
             "category": "Security",
-            "owner_id": admin.id,
-            "created_by": admin.id,
+            "owner_id": user.id,
+            "created_by": user.id,
         },
         {
             "document_id": "NSA-DEP-002",
@@ -119,8 +129,8 @@ with app.app_context():
             "facility": "National Security Agency",
             "department": "NSA",
             "category": "Intelligence",
-            "owner_id": admin.id,
-            "created_by": admin.id,
+            "owner_id": user.id,
+            "created_by": user.id,
         },
         # MOD TOP SECRET resources
         {
@@ -132,8 +142,8 @@ with app.app_context():
             "facility": "Ministry of Defence",
             "department": "MOD",
             "category": "Operations",
-            "owner_id": admin.id,
-            "created_by": admin.id,
+            "owner_id": user.id,
+            "created_by": user.id,
         },
         {
             "document_id": "MOD-TS-002",
@@ -144,8 +154,8 @@ with app.app_context():
             "facility": "Ministry of Defence",
             "department": "MOD",
             "category": "Research",
-            "owner_id": admin.id,
-            "created_by": admin.id,
+            "owner_id": user.id,
+            "created_by": user.id,
         },
     ]
 
@@ -169,3 +179,16 @@ with app.app_context():
     db.session.commit()
     print(f"\n✅ Created {created_count} sample resources.")
     print(f"   Total resources in database: {GovernmentDocument.query.count()}")
+
+    # Show resource summary
+    print("\n📊 Resource Summary by Classification:")
+    classifications = ["PUBLIC", "DEPARTMENT", "TOP_SECRET"]
+    for cls in classifications:
+        count = GovernmentDocument.query.filter_by(classification=cls).count()
+        print(f"   {cls}: {count} resources")
+
+    print("\n📊 Resource Summary by Department:")
+    departments = ["MOD", "MOF", "NSA", "GENERAL"]
+    for dept in departments:
+        count = GovernmentDocument.query.filter_by(department=dept).count()
+        print(f"   {dept}: {count} resources")

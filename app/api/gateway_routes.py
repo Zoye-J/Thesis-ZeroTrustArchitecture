@@ -632,6 +632,45 @@ def handle_registration():
         return jsonify({"error": "Registration failed", "message": str(e)}), 500
 
 
+@gateway_bp.route("/api/resources", methods=["GET"])
+@require_authentication
+def get_resources_proxy():
+    """Proxy resource requests to API Server"""
+    try:
+        request_id = str(uuid.uuid4())
+
+        # Get user info
+        user_claims = g.get("user_claims", {})
+        if not user_claims:
+            return jsonify({"error": "User claims required"}), 401
+
+        # Call API Server
+        api_server_url = current_app.config.get(
+            "API_SERVER_URL", "https://localhost:5001"
+        )
+
+        response = requests.get(
+            f"{api_server_url}/resources",  # Note: NO /api prefix here
+            headers={
+                "Content-Type": "application/json",
+                "X-Service-Token": current_app.config.get(
+                    "GATEWAY_SERVICE_TOKEN", "gateway-token-2024"
+                ),
+                "X-User-Claims": json.dumps(user_claims),
+                "X-Request-ID": request_id,
+            },
+            timeout=10,
+            verify=False,
+        )
+
+        return jsonify(response.json()), response.status_code
+
+    except requests.exceptions.RequestException as e:
+        return jsonify({"error": "API Server unavailable", "message": str(e)}), 503
+    except Exception as e:
+        return jsonify({"error": "Failed to get resources", "message": str(e)}), 500
+
+
 # In app/api/gateway_routes.py - ADD THIS:
 
 

@@ -25,13 +25,17 @@ DOMAIN_TO_FACILITY = {
     "nsa.gov": "National Security Agency",
 }
 
-# Email domain to default department mapping
 DOMAIN_TO_DEFAULT_DEPT = {
-    "mod.gov": "Operations",
-    "mof.gov": "Budget",
-    "nsa.gov": "Cyber Security",
+    "mod.gov": "MOD",          
+    "mof.gov": "MOF",            
+    "nsa.gov": "NSA",           
 }
 
+DOMAIN_TO_CLEARANCE = {
+    "mod.gov": "SECRET",  # MOD users get SECRET clearance
+    "mof.gov": "CONFIDENTIAL",  # MOF users get CONFIDENTIAL
+    "nsa.gov": "BASIC",  # NSA users get BASIC
+}
 
 # IN app/api/public_registration.py - UPDATE THIS FUNCTION:
 
@@ -179,7 +183,7 @@ def public_automated_registration():
             user_class="user",
             facility=facility,
             department=department,
-            clearance_level="BASIC",
+            clearance_level=DOMAIN_TO_CLEARANCE[domain],
             is_active=True,
             created_at=datetime.utcnow(),
             public_key=public_key,

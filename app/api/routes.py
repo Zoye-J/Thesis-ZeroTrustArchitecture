@@ -268,7 +268,7 @@ def verify_certificate():
         )
 
 
-@api_bp.route("/api/resources", methods=["GET"])
+@api_bp.route("/resources", methods=["GET"])
 @require_authentication
 def get_resources():
     """Get all resources visible to the user"""
@@ -294,11 +294,13 @@ def get_resources():
                     accessible_documents.append(doc)
                 continue
 
-            # TOP_SECRET - MOD only with time restrictions
+            # TOP_SECRET - MOD only with clearance and time restrictions
             if doc.classification == "TOP_SECRET":
                 # Only MOD department users
-                if user.department == "MOD" and user.clearance_level == "TOP_SECRET":
-                    accessible_documents.append(doc)
+                if user.department == "MOD":
+                    # MOD users have SECRET clearance by default
+                    if user.clearance_level in ["SECRET", "TOP_SECRET"]:
+                        accessible_documents.append(doc)
                 continue
 
         # Convert to list of dictionaries
@@ -311,7 +313,7 @@ def get_resources():
         return jsonify({"error": "Failed to get resources"}), 500
 
 
-@api_bp.route("/api/resources/<int:resource_id>/access", methods=["POST"])
+@api_bp.route("/resources/<int:resource_id>/access", methods=["POST"])
 @require_authentication
 def request_resource_access(resource_id):
     """Request access to a specific resource"""
@@ -463,7 +465,7 @@ def request_resource_access(resource_id):
         return jsonify({"error": "Failed to process access request"}), 500
 
 
-@api_bp.route("/api/resources/create-sample", methods=["POST"])
+@api_bp.route("/resources/create-sample", methods=["POST"])
 @require_authentication
 def create_sample_resources():
     """Create sample resources for testing (admin only)"""

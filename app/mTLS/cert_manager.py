@@ -307,57 +307,249 @@ subjectAltName = email:{email}
         except Exception as e:
             return False, f"Certificate validation error: {str(e)}"
 
-    def validate_certificate_with_detailed_logging(
-        self, cert_pem, request_id=None, client_ip=None
-    ):
-        """Enhanced certificate validation with detailed logging"""
-        # ... [keep existing validation_with_detailed_logging method unchanged] ...
-        pass  # Keep your existing implementation
+    def validate_certificate(self, cert_pem):
+        """Validate a client certificate"""
+        try:
+            # Parse certificate
+            cert = x509.load_pem_x509_certificate(cert_pem.encode(), default_backend())
 
-    def log_certificate_verification_summary(self, cert_pem, request_id, client_ip):
-        """Create a summary log entry for certificate verification"""
-        # ... [keep existing log_certificate_verification_summary method unchanged] ...
-        pass  # Keep your existing implementation
+            # Check if CA exists
+            if not os.path.exists(self.ca_cert_path):
+                return False, "CA certificate not found"
 
-    def extract_key_usage(self, cert):
-        """Extract key usage information from certificate"""
-        # ... [keep existing extract_key_usage method unchanged] ...
-        pass  # Keep your existing implementation
+            # Load CA certificate
+            with open(self.ca_cert_path, "rb") as f:
+                ca_cert = x509.load_pem_x509_certificate(f.read(), default_backend())
+
+            # Basic validation
+            now = datetime.utcnow()
+
+            if now < cert.not_valid_before:
+                return False, "Certificate not yet valid"
+
+            if now > cert.not_valid_after:
+                return False, "Certificate expired"
+
+            # Check issuer (simplified - in production, verify chain properly)
+            if cert.issuer != ca_cert.subject:
+                return False, "Certificate not issued by trusted CA"
+
+            # Extract info
+            fingerprint = cert.fingerprint(hashes.SHA256()).hex()
+            serial = format(cert.serial_number, "X")
+
+            # Extract subject info
+            subject = {}
+            for attr in cert.subject:
+                subject[attr.oid._name] = attr.value
+
+            issuer = {}
+            for attr in cert.issuer:
+                issuer[attr.oid._name] = attr.value
+
+            cert_info = {
+                "fingerprint": fingerprint,
+                "serial_number": serial,
+                "subject": subject,
+                "issuer": issuer,
+                "not_valid_before": cert.not_valid_before.isoformat(),
+                "not_valid_after": cert.not_valid_after.isoformat(),
+                "raw_certificate": base64.b64encode(cert_pem.encode()).decode(),
+            }
+
+            return True, cert_info
+
+        except Exception as e:
+            return False, f"Certificate validation error: {str(e)}"
 
     def revoke_certificate(self, cert_pem):
-        """Revoke a certificate"""
-        # ... [keep existing revoke_certificate method unchanged] ...
-        pass  # Keep your existing implementation
+        """Revoke a certificate (add to CRL)"""
+        # Placeholder - in production, implement proper CRL
+        try:
+            cert = x509.load_pem_x509_certificate(cert_pem.encode(), default_backend())
+            serial = format(cert.serial_number, "X")
+
+            # Add to revocation list
+            crl_file = os.path.join(self.cert_dir, "crl.json")
+            if os.path.exists(crl_file):
+                with open(crl_file, "r") as f:
+                    revoked = json.load(f)
+            else:
+                revoked = []
+
+            revoked.append(
+                {
+                    "serial": serial,
+                    "revoked_at": datetime.now().isoformat(),
+                    "reason": "user_request",
+                }
+            )
+
+            with open(crl_file, "w") as f:
+                json.dump(revoked, f, indent=2)
+
+            return True, f"Certificate {serial} revoked"
+        except Exception as e:
+            return False, str(e)
 
     def is_certificate_revoked(self, serial):
         """Check if certificate is revoked"""
-        # ... [keep existing is_certificate_revoked method unchanged] ...
-        pass  # Keep your existing implementation
+        crl_file = os.path.join(self.cert_dir, "crl.json")
+        if os.path.exists(crl_file):
+            with open(crl_file, "r") as f:
+                revoked = json.load(f)
+                return any(entry["serial"] == serial for entry in revoked)
+        return False
+
+    # =========================================================================
+    # NEW RSA KEY FUNCTIONS - MINIMAL ADDITION
+    # =========================================================================
 
     def generate_rsa_key_pair(self, user_id, email):
-        """Generate RSA key pair for a user"""
-        # ... [keep existing generate_rsa_key_pair method unchanged] ...
-        pass  # Keep your existing implementation
+        """Generate RSA key pair for a user (simplified version)"""
+        # Create user-specific directory
+        user_key_dir = os.path.join(self.keys_dir, str(user_id))
+        os.makedirs(user_key_dir, exist_ok=True)
+
+        # Generate private key
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+        )
+
+        # Generate public key
+        public_key = private_key.public_key()
+
+        # Serialize private key (PEM format)
+        private_pem = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+
+        # Serialize public key (PEM format)
+        public_pem = public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+
+        # Save keys to files
+        private_key_path = os.path.join(user_key_dir, "private.pem")
+        public_key_path = os.path.join(user_key_dir, "public.pem")
+
+        with open(private_key_path, "wb") as f:
+            f.write(private_pem)
+
+        with open(public_key_path, "wb") as f:
+            f.write(public_pem)
+
+        # Return key info
+        return {
+            "user_id": user_id,
+            "email": email,
+            "public_key": public_pem.decode("utf-8"),
+            "private_key_path": private_key_path,
+            "public_key_path": public_key_path,
+            "key_size": 2048,
+            "algorithm": "RSA",
+            "generated_at": datetime.now().isoformat(),
+        }
 
     def get_user_public_key(self, user_id):
         """Get user's public key from storage"""
-        # ... [keep existing get_user_public_key method unchanged] ...
-        pass  # Keep your existing implementation
+        user_key_dir = os.path.join(self.keys_dir, str(user_id))
+        public_key_path = os.path.join(user_key_dir, "public.pem")
+
+        if os.path.exists(public_key_path):
+            with open(public_key_path, "r") as f:
+                return f.read()
+        return None
 
     def generate_opa_agent_keys(self):
-        """Generate RSA keys for OPA Agent"""
-        # ... [keep existing generate_opa_agent_keys method unchanged] ...
-        pass  # Keep your existing implementation
+        """Generate RSA keys for OPA Agent (simplified)"""
+        agent_key_dir = os.path.join(self.cert_dir, "opa_agent")
+        os.makedirs(agent_key_dir, exist_ok=True)
+
+        # Generate private key
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+        )
+
+        # Generate public key
+        public_key = private_key.public_key()
+
+        # Serialize keys
+        private_pem = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+
+        public_pem = public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+
+        # Save to files
+        private_key_path = os.path.join(agent_key_dir, "private.pem")
+        public_key_path = os.path.join(agent_key_dir, "public.pem")
+
+        with open(private_key_path, "wb") as f:
+            f.write(private_pem)
+
+        with open(public_key_path, "wb") as f:
+            f.write(public_pem)
+
+        print(f"✓ OPA Agent keys generated in: {agent_key_dir}")
+        return public_pem.decode("utf-8")
 
     def load_opa_agent_public_key(self):
-        """Load OPA Agent's public key"""
-        # ... [keep existing load_opa_agent_public_key method unchanged] ...
-        pass  # Keep your existing implementation
+        """Load OPA Agent's public key - GENERATE IF NOT EXISTS"""
+        public_key_path = os.path.join(self.cert_dir, "opa_agent", "public.pem")
+
+        if os.path.exists(public_key_path):
+            with open(public_key_path, "r") as f:
+                return f.read()
+
+        # 🔥 CRITICAL FIX: Generate keys if they don't exist
+        print("⚠️ OPA Agent keys not found - generating now...")
+        return self.generate_opa_agent_keys()
 
     def create_p12_bundle(self, user_id, p12_password):
         """Create PKCS12 bundle for browser import"""
-        # ... [keep existing create_p12_bundle method unchanged] ...
-        pass  # Keep your existing implementation
+        try:
+            client_dir = os.path.join(self.cert_dir, "clients", str(user_id))
+            client_key = os.path.join(client_dir, "client.key")
+            client_crt = os.path.join(client_dir, "client.crt")
+            client_p12 = os.path.join(client_dir, "client.p12")
+
+            # Check if files exist
+            if not os.path.exists(client_key):
+                return False, f"Private key not found: {client_key}"
+            if not os.path.exists(client_crt):
+                return False, f"Certificate not found: {client_crt}"
+            if not os.path.exists(self.ca_cert_path):
+                return False, f"CA certificate not found: {self.ca_cert_path}"
+
+            print(f"  Creating P12 bundle for user {user_id}...")
+
+            # Create PKCS12 bundle (for browsers)
+            p12_cmd = f"""
+            openssl pkcs12 -export -out "{client_p12}" \
+            -inkey "{client_key}" -in "{client_crt}" \
+            -certfile "{self.ca_cert_path}" -passout pass:{p12_password}
+            """
+
+            success = self.run_openssl_command(p12_cmd)
+            if success:
+                print(f"  ✅ P12 bundle created: {client_p12}")
+                return True, client_p12
+            else:
+                return False, "Failed to create P12 bundle"
+
+        except Exception as e:
+            return False, str(e)
 
 
 # Singleton instance
