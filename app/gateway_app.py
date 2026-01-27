@@ -133,8 +133,10 @@ def create_gateway_app(config_name="development"):
     from app.auth.routes import auth_bp
     from app.audit.routes import audit_bp
     from app.api.gateway_routes import gateway_bp
+    from app.api.resource_routes import resource_bp
 
     # ======== ADD REGISTRATION BLUEPRINT ========
+    app.register_blueprint(resource_bp)
     from app.api.registration import registration_bp
 
     app.register_blueprint(registration_bp, url_prefix="/api")

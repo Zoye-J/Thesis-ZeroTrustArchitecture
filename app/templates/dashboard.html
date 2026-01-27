@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard - Government System{% endblock %}
+{% block title %}Dashboard - Government ZTA System{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -22,75 +22,68 @@
     .user-info {
         margin-top: 1rem;
         font-size: 1.1rem;
-    }
-    
-    .stats-grid {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
         gap: 1rem;
-        margin-bottom: 2rem;
     }
     
-    .stat-card {
-        background: white;
-        border-radius: 10px;
-        padding: 1.5rem;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        border-left: 4px solid #1a237e;
+    .info-item {
+        background: rgba(255,255,255,0.1);
+        padding: 0.75rem;
+        border-radius: 5px;
     }
     
-    .stat-card h3 {
-        color: #666;
+    .info-label {
         font-size: 0.9rem;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        margin: 0 0 0.5rem 0;
+        opacity: 0.8;
     }
     
-    .stat-card .value {
-        font-size: 2rem;
+    .info-value {
         font-weight: bold;
-        color: #1a237e;
-        margin: 0;
+        font-size: 1.1rem;
     }
     
-    .actions-grid {
+    .action-center {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
         gap: 1.5rem;
+        margin-top: 2rem;
     }
     
-    .feature-card {
+    .action-card {
         background: white;
         border-radius: 10px;
-        padding: 1.5rem;
+        padding: 2rem;
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         border: 1px solid #e0e0e0;
+        text-align: center;
     }
     
-    .feature-card h3 {
+    .action-card h3 {
         color: #1a237e;
         margin-bottom: 1rem;
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
+        font-size: 1.5rem;
     }
     
-    .feature-card button {
+    .action-card p {
+        color: #666;
+        margin-bottom: 1.5rem;
+    }
+    
+    .action-button {
         background: #1a237e;
         color: white;
         border: none;
-        padding: 0.5rem 1rem;
+        padding: 0.75rem 2rem;
         border-radius: 5px;
         cursor: pointer;
-        margin-top: 1rem;
-        width: 100%;
+        font-size: 1rem;
+        font-weight: bold;
+        transition: background 0.3s;
     }
     
-    .loading {
-        text-align: center;
-        padding: 3rem;
-        color: #666;
+    .action-button:hover {
+        background: #283593;
     }
     
     .clearance-badge {
@@ -114,7 +107,6 @@
     Loading dashboard...
 </div>
 
-
 <script>
 async function loadDashboard() {
     try {
@@ -125,7 +117,7 @@ async function loadDashboard() {
             return;
         }
         
-        // FIRST: Try to get user info from the API endpoint
+        // Get user info
         const userResponse = await fetch('/api/auth/me', {
             headers: {
                 'Authorization': `Bearer ${token}`
@@ -133,7 +125,6 @@ async function loadDashboard() {
         });
         
         if (userResponse.status === 401) {
-            // Token expired or invalid
             localStorage.removeItem('access_token');
             window.location.href = '/';
             return;
@@ -145,7 +136,6 @@ async function loadDashboard() {
         
         const userData = await userResponse.json();
         
-        // Check if user is authenticated
         if (!userData.authenticated) {
             window.location.href = '/';
             return;
@@ -161,67 +151,53 @@ async function loadDashboard() {
             case 'TOP_SECRET': clearanceClass = 'clearance-top-secret'; break;
         }
         
-        // Render dashboard content
+        // Render SIMPLIFIED dashboard
         document.getElementById('dashboardContent').innerHTML = `
             <div class="welcome-banner">
                 <h1>Welcome, ${user.username}!</h1>
                 <div class="user-info">
-                    <div>Role: <strong>${user.user_class}</strong></div>
-                    <div>Facility: <strong>${user.facility}</strong></div>
-                    <div>Department: <strong>${user.department}</strong></div>
-                    <div>Clearance: 
-                        <span class="clearance-badge ${clearanceClass}">
+                    <div class="info-item">
+                        <div class="info-label">Department</div>
+                        <div class="info-value">${user.department}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Role</div>
+                        <div class="info-value">${user.user_class}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Clearance</div>
+                        <div class="info-value">
                             ${user.clearance_level}
-                        </span>
+                            <span class="clearance-badge ${clearanceClass}">
+                                ${user.clearance_level}
+                            </span>
+                        </div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Facility</div>
+                        <div class="info-value">${user.facility}</div>
                     </div>
                 </div>
             </div>
             
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <h3>Your Role</h3>
-                    <p class="value">${user.user_class}</p>
-                </div>
-                <div class="stat-card">
-                    <h3>Facility</h3>
-                    <p class="value">${user.facility}</p>
-                </div>
-                <div class="stat-card">
-                    <h3>Department</h3>
-                    <p class="value">${user.department}</p>
-                </div>
-                <div class="stat-card">
-                    <h3>Clearance</h3>
-                    <p class="value">${user.clearance_level}</p>
-                </div>
-            </div>
-            
-            <div class="actions-grid">
-                <div class="feature-card">
-                    <h3>📄 Documents</h3>
-                    <p>Access and manage government documents in your department.</p>
-                    <button onclick="viewDocuments()">View Documents</button>
+            <div class="action-center">
+                <div class="action-card">
+                    <h3>🔐 Access Resources</h3>
+                    <p>View and access government resources based on your clearance level and department</p>
+                    <button onclick="accessResources()" class="action-button">Go to Resource Portal</button>
                 </div>
                 
                 ${user.user_class === 'admin' || user.user_class === 'superadmin' ? `
-                <div class="feature-card">
-                    <h3>👥 User Management</h3>
-                    <p>Manage system users and permissions in your facility.</p>
-                    <button onclick="manageUsers()">Manage Users</button>
+                <div class="action-card">
+                    <h3>👥 Manage Users</h3>
+                    <p>Administrator panel for user management and permissions</p>
+                    <button onclick="manageUsers()" class="action-button">User Management</button>
                 </div>
                 ` : ''}
                 
-                <div class="feature-card">
-                    <h3>⚙️ Profile</h3>
-                    <p>View and update your profile information.</p>
-                    <button onclick="viewProfile()">My Profile</button>
-                </div>
+            
                 
-                <div class="feature-card">
-                    <h3>📊 Security Dashboard</h3>
-                    <p>View real-time ZTA security events and logs.</p>
-                    <button onclick="window.location.href='/audit'">View Security Logs</button>
-                </div>
+                
             </div>
         `;
         
@@ -231,76 +207,42 @@ async function loadDashboard() {
             <div style="background: #f8d7da; color: #721c24; padding: 2rem; border-radius: 5px;">
                 <h3>Error Loading Dashboard</h3>
                 <p>${error.message}</p>
-                <button onclick="window.location.href='/'" 
-                        style="background: #1a237e; color: white; border: none; padding: 0.5rem 1rem; border-radius: 5px; cursor: pointer; margin-top: 1rem;">
-                    Back to Login
-                </button>
+                <button onclick="window.location.href='/'">Back to Login</button>
             </div>
         `;
     }
 }
 
 // Action functions
-function viewDocuments() {
-    const token = localStorage.getItem('access_token');
-    if (!token) {
-        window.location.href = '/';
-        return;
-    }
-    
-    // Redirect to documents page
-    window.location.href = '/documents';
+function accessResources() {
+    window.location.href = '/resources';
 }
 
 function manageUsers() {
     const token = localStorage.getItem('access_token');
-    if (!token) {
-        window.location.href = '/';
-        return;
-    }
-    
-    // Check if user is admin by calling API
     fetch('/api/users', {
-        headers: {
-            'Authorization': `Bearer ${token}`
-        }
+        headers: {'Authorization': `Bearer ${token}`}
     })
     .then(response => {
         if (response.status === 403) {
             alert('Access Denied: Admin privileges required');
         } else if (response.ok) {
             window.location.href = '/admin/users';
-        } else {
-            alert('Error checking permissions');
         }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        alert('Network error');
     });
 }
 
 function viewProfile() {
-    const token = localStorage.getItem('access_token');
-    if (!token) {
-        window.location.href = '/';
-        return;
-    }
-    
     window.location.href = '/profile';
 }
 
-// Load dashboard when page loads
 document.addEventListener('DOMContentLoaded', loadDashboard);
 
-// Add a simple check for token when page loads
+// Check token
 window.addEventListener('load', function() {
-    const token = localStorage.getItem('access_token');
-    if (!token) {
-        // If no token, redirect to login
+    if (!localStorage.getItem('access_token')) {
         window.location.href = '/';
     }
 });
-
 </script>
 {% endblock %}
