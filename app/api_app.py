@@ -48,6 +48,127 @@ def create_api_app(config_name="development"):
     from app.auth.routes import auth_bp
     from app.api.registration import registration_bp
 
+    # ======== ADD RESOURCES ENDPOINT ========
+    @api_bp.route("/resources", methods=["GET"])
+    def get_resources():
+        """Get department-based resources"""
+        try:
+            user_claims = g.get("user_claims", {})
+            if not user_claims:
+                return jsonify({"error": "User claims required"}), 400
+
+            user_department = user_claims.get("department")
+            user_clearance = user_claims.get("clearance_level", "BASIC")
+
+            # Current hour for time-based restrictions
+            current_hour = datetime.now().hour
+
+            # Define resources based on department
+            all_resources = [
+                {
+                    "id": 1,
+                    "name": "Public Notice Board",
+                    "tier": "PUBLIC",
+                    "department": "ALL",
+                },
+                {
+                    "id": 2,
+                    "name": "Government Circulars",
+                    "tier": "PUBLIC",
+                    "department": "ALL",
+                },
+                {
+                    "id": 3,
+                    "name": "MOD Operations Brief",
+                    "tier": "DEPARTMENT",
+                    "department": "MOD",
+                },
+                {
+                    "id": 4,
+                    "name": "MOD Budget Report",
+                    "tier": "DEPARTMENT",
+                    "department": "MOD",
+                },
+                {
+                    "id": 5,
+                    "name": "Top Secret MOD Plans",
+                    "tier": "TOP_SECRET",
+                    "department": "MOD",
+                },
+                {
+                    "id": 6,
+                    "name": "MOF Fiscal Policy",
+                    "tier": "DEPARTMENT",
+                    "department": "MOF",
+                },
+                {
+                    "id": 7,
+                    "name": "MOF Budget Documents",
+                    "tier": "DEPARTMENT",
+                    "department": "MOF",
+                },
+                {
+                    "id": 8,
+                    "name": "NSA Cyber Reports",
+                    "tier": "DEPARTMENT",
+                    "department": "NSA",
+                },
+                {
+                    "id": 9,
+                    "name": "NSA Threat Assessment",
+                    "tier": "DEPARTMENT",
+                    "department": "NSA",
+                },
+            ]
+
+            # Filter resources based on department and clearance
+            filtered_resources = []
+            for resource in all_resources:
+                if resource["tier"] == "PUBLIC":
+                    filtered_resources.append(resource)
+                elif (
+                    resource["tier"] == "DEPARTMENT"
+                    and resource["department"] == user_department
+                ):
+                    filtered_resources.append(resource)
+                elif (
+                    resource["tier"] == "TOP_SECRET"
+                    and resource["department"] == user_department
+                ):
+                    # Check time restriction (8 AM - 4 PM)
+                    if 8 <= current_hour < 16:
+                        filtered_resources.append(resource)
+                    else:
+                        resource_copy = resource.copy()
+                        resource_copy["name"] = (
+                            "🔒 Top Secret (Available 8 AM - 4 PM Only)"
+                        )
+                        resource_copy["restricted"] = True
+                        filtered_resources.append(resource_copy)
+
+            return jsonify(
+                {
+                    "resources": filtered_resources,
+                    "user_info": {
+                        "department": user_department,
+                        "clearance": user_clearance,
+                        "current_hour": current_hour,
+                    },
+                    "zta_context": {
+                        "server": "api_server",
+                        "request_id": g.get("request_id", "unknown"),
+                    },
+                }
+            )
+
+        except Exception as e:
+            return (
+                jsonify({"error": "Failed to fetch resources", "message": str(e)}),
+                500,
+            )
+
+    # ======== END RESOURCES ENDPOINT ========
+
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
     app.register_blueprint(registration_bp, url_prefix="/api/register")
     app.register_blueprint(api_bp, url_prefix="/api")

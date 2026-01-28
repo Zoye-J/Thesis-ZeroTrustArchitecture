@@ -230,6 +230,34 @@ allow_certificate_issue := {"allow": true, "reason": "Superadmin can issue any c
     valid_certificate
 }
 
+allow {
+    # Normal policy checks pass
+    input.user.role == "user"
+    input.resource.type == "document"
+    input.resource.department == input.user.department
+    
+    # Risk-based decision
+    risk_decision := risk_based_decision(input.risk_score, input.resource.classification)
+    risk_decision == "allow"
+}
+
+# Risk decision matrix
+risk_based_decision(risk_score, classification) := "allow" {
+    classification == "PUBLIC"
+    risk_score <= 80
+} else := "allow" {
+    classification == "DEPARTMENT"
+    risk_score <= 60
+} else := "allow" {
+    classification == "TOP_SECRET"
+    risk_score <= 40
+    # Additional time check for TOP_SECRET
+    current_hour := time.clock_hour(input.environment.timestamp)
+    current_hour >= 8
+    current_hour <= 16
+} else := "deny" {
+    true
+}
 #############################################
 # AUDIT LOG ACCESS WITH AUTHENTICATION
 #############################################

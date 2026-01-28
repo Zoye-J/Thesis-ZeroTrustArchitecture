@@ -50,6 +50,52 @@ class OpaAgent:
             logger.error(f"Failed to decrypt request: {e}")
             raise
 
+    def evaluate_with_risk(self, request_data):
+        """Evaluate request with risk scoring"""
+        from app.services.risk_scorer import RiskScorer
+        
+        # Calculate risk score
+        scorer = RiskScorer()
+        resource_sensitivity = request_data.get("resource", {}).get("classification", "PUBLIC")
+        risk_score = scorer.calculate_risk(request_data, resource_sensitivity)
+        risk_level = scorer.get_risk_level(risk_score)
+        
+        # Add risk to request data
+        request_data["risk"] = {
+            "score": risk_score,
+            "level": risk_level,
+            "threshold": 50  # Score above 50 requires additional checks
+        }
+        
+        print(f"📊 Risk Score: {risk_score} ({risk_level})")
+        
+        # Call OPA Server with risk info
+        opa_input = {
+            "input": {
+                **request_data,
+                "risk_score": risk_score,
+                "risk_level": risk_level
+            }
+        }
+        
+        # Send to OPA Server
+        response = requests.post(
+            "http://localhost:8181/v1/data/zta/allow",
+            json=opa_input,
+            timeout=5
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            result["risk_assessment"] = {
+                "score": risk_score,
+                "level": risk_level,
+                "factors_considered": ["time", "location", "device", "authentication"]
+            }
+            return result
+        
+        return {"allow": False, "reason": "OPA Server error"}
+
     def encrypt_response(self, data, user_public_key):
         """Encrypt response for specific user"""
         try:

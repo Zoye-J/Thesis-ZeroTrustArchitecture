@@ -12,6 +12,7 @@ import hashlib
 import json
 import requests
 import base64
+import os
 
 gateway_bp = Blueprint("gateway", __name__)
 
@@ -632,46 +633,92 @@ def handle_registration():
         return jsonify({"error": "Registration failed", "message": str(e)}), 500
 
 
+# Add this near other resource endpoints in gateway_routes.py
+
+
 @gateway_bp.route("/api/resources", methods=["GET"])
 @require_authentication
-def get_resources_proxy():
-    """Proxy resource requests to API Server"""
+def get_resources_proper():
+    """
+    PROPER ZTA Resource Flow:
+    User → Gateway → API Server → Gateway → User
+    (No encryption needed for resource listing)
+    """
     try:
-        request_id = str(uuid.uuid4())
-
-        # Get user info
         user_claims = g.get("user_claims", {})
         if not user_claims:
             return jsonify({"error": "User claims required"}), 401
 
-        # Call API Server
+        print(
+            f"📡 Resource request for {user_claims.get('username')} ({user_claims.get('department')})"
+        )
+
+        # Direct call to API Server (no encryption needed for listing)
         api_server_url = current_app.config.get(
             "API_SERVER_URL", "https://localhost:5001"
         )
 
-        response = requests.get(
-            f"{api_server_url}/resources",  # Note: NO /api prefix here
-            headers={
-                "Content-Type": "application/json",
-                "X-Service-Token": current_app.config.get(
-                    "GATEWAY_SERVICE_TOKEN", "gateway-token-2024"
-                ),
-                "X-User-Claims": json.dumps(user_claims),
-                "X-Request-ID": request_id,
-            },
-            timeout=10,
-            verify=False,
+        # Use service token for API Server communication
+        service_token = current_app.config.get(
+            "GATEWAY_SERVICE_TOKEN", "gateway-token-2024"
         )
 
-        return jsonify(response.json()), response.status_code
+        response = requests.get(
+            f"{api_server_url}/resources",
+            headers={
+                "Content-Type": "application/json",
+                "X-Service-Token": service_token,
+                "X-User-Claims": json.dumps(user_claims),
+                "X-Request-ID": str(uuid.uuid4()),
+            },
+            timeout=10,
+            verify=os.path.exists("certs/ca.crt"),  # Verify SSL if CA cert exists
+        )
 
-    except requests.exceptions.RequestException as e:
-        return jsonify({"error": "API Server unavailable", "message": str(e)}), 503
+        if response.status_code == 200:
+            resources = response.json()
+
+            # Log successful access
+            event_logger.log_event(
+                event_type=EventType.RESOURCE_ACCESS,
+                source_component="gateway",
+                action="Resource list retrieved",
+                user_id=user_claims.get("sub"),
+                username=user_claims.get("username"),
+                details={
+                    "resource_count": len(resources),
+                    "user_department": user_claims.get("department"),
+                    "flow": "direct_api",
+                },
+                trace_id=g.request_id,
+            )
+
+            return jsonify(resources), 200
+        else:
+            return jsonify(response.json()), response.status_code
+
+    except requests.exceptions.SSLError as ssl_error:
+        print(f"❌ SSL Error: {ssl_error}")
+        # Fallback without SSL verification
+        try:
+            response = requests.get(
+                f"{api_server_url}/resources",
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Service-Token": service_token,
+                    "X-User-Claims": json.dumps(user_claims),
+                    "X-Request-ID": str(uuid.uuid4()),
+                },
+                timeout=10,
+                verify=False,
+            )
+            return jsonify(response.json()), response.status_code
+        except Exception as e:
+            return jsonify({"error": f"SSL and fallback failed: {str(e)}"}), 503
+
     except Exception as e:
+        print(f"❌ Resource error: {e}")
         return jsonify({"error": "Failed to get resources", "message": str(e)}), 500
-
-
-# In app/api/gateway_routes.py - ADD THIS:
 
 
 @gateway_bp.route("/test-encryption")

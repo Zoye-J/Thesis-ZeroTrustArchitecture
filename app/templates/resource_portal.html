@@ -241,7 +241,7 @@ async function loadResourcePortal() {
 async function loadResources() {
     try {
         const token = localStorage.getItem('access_token');
-        const response = await fetch('/api/resources', {
+        const response = await fetch('/api/resources', {  // Use the main endpoint
             headers: { 'Authorization': `Bearer ${token}` }
         });
         
@@ -250,10 +250,12 @@ async function loadResources() {
         }
         
         resources = await response.json();
+        console.log(`✅ Loaded ${resources.length} resources`);
         
     } catch (error) {
         console.error('Error loading resources:', error);
-        resources = [];
+        
+      
     }
 }
 

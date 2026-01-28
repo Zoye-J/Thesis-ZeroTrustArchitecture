@@ -1,5 +1,5 @@
 """
-Service Communicator for ENCRYPTED ZTA Workflow
+Service Communicator for ENCRYPTED ZTA Workflow - FIXED VERSION
 Handles encrypted communication between Gateway → OPA Agent → OPA Server → API Server
 """
 
@@ -8,14 +8,13 @@ import json
 import uuid
 from flask import current_app, request, g, jsonify
 import logging
-from app.logs.zta_event_logger import event_logger, EventType  # CHANGED HERE
+from app.logs.zta_event_logger import event_logger, EventType
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
 
 class EncryptedServiceCommunicator:
-
     def __init__(self):
         self.opa_agent_client = None
         self.api_server_url = None
@@ -47,16 +46,92 @@ class EncryptedServiceCommunicator:
 
     def process_encrypted_request(self, flask_request, user_claims):
         """
-        NEW ENCRYPTED WORKFLOW:
-        User → Gateway → (Encrypted) → OPA Agent → OPA Server → API Server → (Encrypted) → Gateway → User
+        SMART workflow - uses encryption only when needed
+        Resource endpoints go directly to API Server
         """
         request_id = str(uuid.uuid4())
         g.request_id = request_id
 
-        logger.info(f"[{request_id}] === ENCRYPTED ZTA FLOW START ===")
+        logger.info(f"[{request_id}] === ZTA FLOW START ===")
         logger.info(f"[{request_id}] User: {user_claims.get('username')}")
         logger.info(f"[{request_id}] Endpoint: {flask_request.path}")
 
+        # ============ SMART ROUTING ============
+        # Resource endpoints go DIRECT to API Server (no encryption needed)
+        if flask_request.path.startswith("/api/resources"):
+            logger.info(f"[{request_id}] 📡 RESOURCE ENDPOINT - Using direct API flow")
+            return self._handle_resource_request(flask_request, user_claims, request_id)
+
+        # Document/user endpoints use encrypted flow
+        elif flask_request.path.startswith(("/api/documents", "/api/users")):
+            logger.info(f"[{request_id}] 🔐 ENCRYPTED ENDPOINT - Using OPA Agent flow")
+            return self._handle_encrypted_request(
+                flask_request, user_claims, request_id
+            )
+
+        # Default: use encrypted flow
+        else:
+            logger.info(f"[{request_id}] ⚙️  DEFAULT ENDPOINT - Using OPA Agent flow")
+            return self._handle_encrypted_request(
+                flask_request, user_claims, request_id
+            )
+
+    def _handle_resource_request(self, flask_request, user_claims, request_id):
+        """Handle resource requests directly (no encryption needed)"""
+        try:
+            logger.info(f"[{request_id}] 📡 Direct API call for resources")
+
+            # Call API Server directly
+            response = requests.get(
+                f"{self.api_server_url}/api/resources",
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Service-Token": current_app.config.get(
+                        "API_SERVICE_TOKEN", "api-token-2024-zta"
+                    ),
+                    "X-User-Claims": json.dumps(user_claims),
+                    "X-Request-ID": request_id,
+                },
+                timeout=10,
+                verify=False,  # For development
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                logger.info(f"[{request_id}] ✅ Resources retrieved: {len(data)} items")
+
+                # Log successful direct flow
+                event_logger.log_event(
+                    event_type=EventType.API_RESPONSE,
+                    source_component="service_communicator",
+                    action="Direct resource retrieval",
+                    user_id=user_claims.get("sub"),
+                    username=user_claims.get("username"),
+                    details={
+                        "request_id": request_id,
+                        "endpoint": flask_request.path,
+                        "resource_count": len(data),
+                        "flow": "Direct API → Gateway → User",
+                    },
+                    status="success",
+                    trace_id=request_id,
+                )
+
+                return jsonify(data), 200
+            else:
+                logger.error(
+                    f"[{request_id}] ❌ API Server error: {response.status_code}"
+                )
+                return jsonify(response.json()), response.status_code
+
+        except Exception as e:
+            logger.error(f"[{request_id}] ❌ Direct resource error: {e}")
+            return self._create_error_response(
+                500, f"Resource request failed: {str(e)}", request_id
+            )
+
+    def _handle_encrypted_request(self, flask_request, user_claims, request_id):
+        """Handle encrypted requests through OPA Agent"""
         try:
             # Step 1: Get user's public key
             user_public_key = self._get_user_public_key(user_claims.get("sub"))
@@ -79,100 +154,73 @@ class EncryptedServiceCommunicator:
                 )
 
             # Step 4: Encrypt and send to OPA Agent
-            try:
-                encrypted_request = self.opa_agent_client.encrypt_for_agent(
-                    request_data
-                )
+            encrypted_request = self.opa_agent_client.encrypt_for_agent(request_data)
 
-                agent_response = self.opa_agent_client.send_to_agent(
-                    encrypted_request, user_public_key, request_id
-                )
+            agent_response = self.opa_agent_client.send_to_agent(
+                encrypted_request, user_public_key, request_id
+            )
 
-                if not agent_response:
-                    return self._create_error_response(
-                        503, "OPA Agent did not respond", request_id
-                    )
-
-                # Step 5: Extract encrypted response
-                encrypted_response = agent_response.get("encrypted_response")
-                if not encrypted_response:
-                    return self._create_error_response(
-                        500, "No encrypted response from OPA Agent", request_id
-                    )
-
-                # Step 6: Return encrypted response to client
-                # (Client will decrypt with their private key)
-                logger.info(f"[{request_id}] Returning encrypted response to user")
-
-                # Log successful encrypted flow
-                event_logger.log_event(
-                    event_type=EventType.RESPONSE_ENCRYPTED,
-                    source_component="service_communicator",
-                    action="Encrypted response returned",
-                    user_id=user_claims.get("sub"),
-                    username=user_claims.get("username"),
-                    details={
-                        "request_id": request_id,
-                        "endpoint": flask_request.path,
-                        "encryption_used": True,
-                        "algorithm": "RSA-OAEP-SHA256",
-                    },
-                    status="success",
-                    trace_id=request_id,
-                )
-
-                return (
-                    jsonify(
-                        {
-                            "status": "success",
-                            "encrypted_payload": encrypted_response,
-                            "encryption_info": {
-                                "algorithm": "RSA-OAEP-SHA256",
-                                "key_size": 2048,
-                                "format": "base64",
-                                "request_id": request_id,
-                            },
-                            "zta_context": {
-                                "flow": "User → Gateway → OPA Agent → OPA Server → API Server → Gateway → User",
-                                "request_id": request_id,
-                                "encryption_used": True,
-                            },
-                        }
-                    ),
-                    200,
-                )
-
-            except Exception as e:
-                logger.error(f"[{request_id}] OPA Agent communication error: {e}")
-
-                # Log error event
-                event_logger.log_event(
-                    event_type=EventType.ENCRYPTION_FAILED,
-                    source_component="service_communicator",
-                    action="OPA Agent communication error",
-                    user_id=user_claims.get("sub"),
-                    username=user_claims.get("username"),
-                    details={
-                        "request_id": request_id,
-                        "error": str(e),
-                        "endpoint": flask_request.path,
-                    },
-                    status="failure",
-                    trace_id=request_id,
-                )
-
+            if not agent_response:
                 return self._create_error_response(
-                    500, f"OPA Agent error: {str(e)}", request_id
+                    503, "OPA Agent did not respond", request_id
                 )
+
+            # Step 5: Extract encrypted response
+            encrypted_response = agent_response.get("encrypted_response")
+            if not encrypted_response:
+                return self._create_error_response(
+                    500, "No encrypted response from OPA Agent", request_id
+                )
+
+            # Step 6: Return encrypted response to client
+            logger.info(f"[{request_id}] Returning encrypted response to user")
+
+            # Log successful encrypted flow
+            event_logger.log_event(
+                event_type=EventType.RESPONSE_ENCRYPTED,
+                source_component="service_communicator",
+                action="Encrypted response returned",
+                user_id=user_claims.get("sub"),
+                username=user_claims.get("username"),
+                details={
+                    "request_id": request_id,
+                    "endpoint": flask_request.path,
+                    "encryption_used": True,
+                    "algorithm": "RSA-OAEP-SHA256",
+                },
+                status="success",
+                trace_id=request_id,
+            )
+
+            return (
+                jsonify(
+                    {
+                        "status": "success",
+                        "encrypted_payload": encrypted_response,
+                        "encryption_info": {
+                            "algorithm": "RSA-OAEP-SHA256",
+                            "key_size": 2048,
+                            "format": "base64",
+                            "request_id": request_id,
+                        },
+                        "zta_context": {
+                            "flow": "User → Gateway → OPA Agent → OPA Server → API Server → Gateway → User",
+                            "request_id": request_id,
+                            "encryption_used": True,
+                        },
+                    }
+                ),
+                200,
+            )
 
         except Exception as e:
-            logger.error(f"[{request_id}] Encrypted flow error: {e}")
+            logger.error(f"[{request_id}] OPA Agent communication error: {e}")
 
             # Log error event
             event_logger.log_event(
-                event_type=EventType.ERROR,
+                event_type=EventType.ENCRYPTION_FAILED,
                 source_component="service_communicator",
-                action="Encrypted flow error",
+                action="OPA Agent communication error",
                 user_id=user_claims.get("sub"),
                 username=user_claims.get("username"),
                 details={
@@ -185,10 +233,8 @@ class EncryptedServiceCommunicator:
             )
 
             return self._create_error_response(
-                500, f"Encrypted processing error: {str(e)}", request_id
+                500, f"OPA Agent error: {str(e)}", request_id
             )
-        finally:
-            logger.info(f"[{request_id}] === ENCRYPTED ZTA FLOW END ===")
 
     def _get_user_public_key(self, user_id):
         """Get user's public key from database or key storage"""

@@ -6,6 +6,8 @@ import os
 from flask import Flask, render_template, redirect, url_for
 from app import jwt, cors
 from app.config import DevelopmentConfig
+import ssl
+import certifi
 
 
 def create_gateway_app(config_name="development"):
@@ -19,6 +21,25 @@ def create_gateway_app(config_name="development"):
         ConfigClass = DevelopmentConfig
 
     app.config.from_object(ConfigClass)
+
+    # Configure SSL context
+    ca_cert_path = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)), "certs", "ca.crt"
+    )
+
+    if os.path.exists(ca_cert_path):
+        # Add our CA to certifi
+        with open(ca_cert_path, "r") as ca_file:
+            ca_content = ca_file.read()
+
+        with open(certifi.where(), "a") as certifi_file:
+            certifi_file.write("\n" + ca_content)
+
+        app.config["SSL_CA_CERT"] = ca_cert_path
+        print(f"✅ SSL configured with CA: {ca_cert_path}")
+    else:
+        app.config["SSL_CA_CERT"] = False
+        print("⚠️  CA certificate not found, SSL verification disabled")
 
     # ======== DATABASE CONFIGURATION ========
     # Use absolute path for clarity
