@@ -8,6 +8,9 @@ mTLS + HTTPS only - NO WebSockets
 import sys
 import os
 import ssl
+from flask import render_template, g
+from app.mTLS.middleware import require_authentication
+from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -33,15 +36,41 @@ def generate_request_id():
     g.request_id = str(uuid.uuid4())
 
 
-# Gateway proxy endpoint - uses REAL service communicator
+@app.route("/api/opa-agent-public-key", methods=["GET"])
+def public_opa_agent_key():
+    """Public endpoint for OPA Agent public key - NO AUTH"""
+    try:
+        from app.opa_agent.client import get_opa_agent_client
+
+        client = get_opa_agent_client()
+        public_key = client.get_public_key()
+
+        if not public_key:
+            return jsonify({"error": "OPA Agent public key not available"}), 503
+
+        return (
+            jsonify(
+                {
+                    "public_key": public_key,
+                    "algorithm": "RSA-OAEP-SHA256",
+                    "key_size": 2048,
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+            ),
+            200,
+        )
+
+    except Exception as e:
+        return jsonify({"error": f"Failed to get OPA Agent key: {str(e)}"}), 500
+
+
 @app.route("/api/<path:subpath>", methods=["GET", "POST", "PUT", "DELETE"])
 def gateway_proxy(subpath):
     """
-    Gateway endpoint - authenticates client and forwards to API server
-    Uses REAL service communicator for distributed flow
+    Gateway endpoint - uses encrypted flow for everything
+    Authenticates client and forwards through OPA Agent
     """
     try:
-
         # For now, we'll handle authentication directly here
         from app.mTLS.middleware import (
             extract_client_certificate,
@@ -107,7 +136,26 @@ def gateway_proxy(subpath):
             return jsonify({"error": "Authentication required"}), 401
 
         # Use REAL service communicator to process request
-        return process_encrypted_request(request, user_claims)
+        result = process_encrypted_request(request, user_claims)
+
+        # Check if this is an encrypted response that needs processing
+        if isinstance(result, tuple) and len(result) == 2:
+            response_data, status_code = result
+
+            # If it's a Flask Response object with encrypted_payload, return as-is
+            if hasattr(response_data, "json"):
+                try:
+                    json_data = response_data.get_json()
+                    if json_data and "encrypted_payload" in json_data:
+                        # This is an encrypted response - return it directly to client
+                        # Client's JavaScript will decrypt it
+                        return response_data, status_code
+                except:
+                    pass
+
+            return result
+
+        return result
 
     except Exception as e:
         return (
@@ -120,6 +168,123 @@ def gateway_proxy(subpath):
             ),
             500,
         )
+
+
+@app.route("/resources/<int:resource_id>/view")
+@require_authentication
+def view_resource_page(resource_id):
+    """
+    View resource page - uses OPA Agent encrypted flow
+    This is the HTML page users see
+    """
+    try:
+        # Get current user from g (set by require_authentication middleware)
+        user = g.current_user
+
+        # Prepare user claims for OPA Agent
+        user_claims = {
+            "sub": user.id,
+            "username": user.username,
+            "email": user.email,
+            "user_class": user.user_class,
+            "facility": user.facility,
+            "department": user.department,
+            "clearance_level": user.clearance_level,
+            "auth_method": getattr(g, "auth_method", "jwt"),
+        }
+
+        # Log the view request
+        from app.logs.zta_event_logger import event_logger, EventType, Severity
+
+        event_logger.log_event(
+            event_type=EventType.REQUEST_RECEIVED,
+            source_component="gateway",
+            action=f"Resource view requested - ID: {resource_id}",
+            user_id=user.id,
+            username=user.username,
+            details={
+                "resource_id": resource_id,
+                "method": "GET",
+                "endpoint": f"/resources/{resource_id}/view",
+            },
+            trace_id=g.request_id,
+            severity=Severity.INFO,
+        )
+
+        # Render a loader page that will fetch via OPA Agent
+        return render_template(
+            "view_resource_loader.html",
+            resource_id=resource_id,
+            current_user=user,
+            trace_id=g.request_id,
+            user_claims=user_claims,
+        )
+
+    except Exception as e:
+        return render_template(
+            "error.html",
+            error=f"Failed to load resource: {str(e)}",
+            trace_id=getattr(g, "request_id", "unknown"),
+        )
+
+
+@app.route("/debug/cert-manager", methods=["GET"])
+def debug_cert_manager():
+    """Debug certificate manager state"""
+    try:
+        from app.mTLS.cert_manager import cert_manager
+
+        # Check OPA Agent keys
+        opa_dir = os.path.join(cert_manager.cert_dir, "opa_agent")
+        opa_exists = os.path.exists(opa_dir)
+
+        public_key = None
+        if opa_exists:
+            public_key_path = os.path.join(opa_dir, "public.pem")
+            if os.path.exists(public_key_path):
+                with open(public_key_path, "r") as f:
+                    public_key = f.read()
+
+        # Try to load via cert_manager
+        loaded_key = cert_manager.load_opa_agent_public_key()
+
+        return (
+            jsonify(
+                {
+                    "opa_agent": {
+                        "directory_exists": opa_exists,
+                        "directory_path": opa_dir,
+                        "public_key_file_exists": (
+                            os.path.exists(os.path.join(opa_dir, "public.pem"))
+                            if opa_exists
+                            else False
+                        ),
+                        "public_key_loaded": bool(loaded_key),
+                        "loaded_key_length": len(loaded_key) if loaded_key else 0,
+                        "loaded_key_valid": (
+                            loaded_key
+                            and loaded_key.startswith("-----BEGIN PUBLIC KEY-----")
+                            if loaded_key
+                            else False
+                        ),
+                        "loaded_key_preview": (
+                            loaded_key[:200] + "..." if loaded_key else None
+                        ),
+                        "manual_key_length": len(public_key) if public_key else 0,
+                        "manual_key_valid": (
+                            public_key
+                            and public_key.startswith("-----BEGIN PUBLIC KEY-----")
+                            if public_key
+                            else False
+                        ),
+                    }
+                }
+            ),
+            200,
+        )
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # Keep some direct endpoints for testing

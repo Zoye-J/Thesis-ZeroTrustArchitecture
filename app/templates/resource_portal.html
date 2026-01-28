@@ -237,11 +237,10 @@ async function loadResourcePortal() {
     }
 }
 
-// Load resources from API
 async function loadResources() {
     try {
         const token = localStorage.getItem('access_token');
-        const response = await fetch('/api/resources', {  // Use the main endpoint
+        const response = await fetch('/api/resources', {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         
@@ -249,15 +248,44 @@ async function loadResources() {
             throw new Error('Failed to load resources');
         }
         
-        resources = await response.json();
-        console.log(`✅ Loaded ${resources.length} resources`);
+        const data = await response.json();
+        
+        // Check if response is encrypted
+        if (data.encrypted_payload) {
+            // We need to decrypt using the ZTA encryption library
+            if (window.ztaEncryptor && window.ztaEncryptor.initialized) {
+                try {
+                    const decrypted = await window.ztaEncryptor.decryptFromAgent(data.encrypted_payload);
+                    console.log('Decrypted resources:', decrypted);
+                    
+                    // Handle the decrypted response
+                    if (decrypted.allowed && decrypted.api_response) {
+                        resources = decrypted.api_response.data || [];
+                        console.log(`✅ Loaded ${resources.length} resources via encrypted flow`);
+                    } else {
+                        console.error('Access denied by policy:', decrypted);
+                        resources = [];
+                    }
+                } catch (decryptError) {
+                    console.error('Decryption failed:', decryptError);
+                    resources = [];
+                }
+            } else {
+                console.error('Encryption not initialized');
+                resources = [];
+            }
+        } else {
+            // Direct response (for now)
+            resources = data.resources || data || [];
+            console.log(`✅ Loaded ${resources.length} resources`);
+        }
         
     } catch (error) {
         console.error('Error loading resources:', error);
-        
-      
+        resources = [];
     }
 }
+
 
 // Generate classification filter options based on user
 function getClassificationOptions() {
@@ -364,37 +392,54 @@ function renderPortal() {
     `;
 }
 
-// Filter resources based on current filters
 function filterResources() {
-    return resources.filter(resource => {
-        // Classification filter
-        if (filters.classification !== 'all' && resource.classification !== filters.classification) {
+    console.log('Filtering with:', filters);
+    console.log('Total resources:', resources.length);
+    
+    const filtered = resources.filter(resource => {
+        // Classification filter - use tier instead of classification
+        if (filters.classification !== 'all' && resource.tier !== filters.classification) {
+            console.log(`Skipping ${resource.name} - tier ${resource.tier} doesn't match ${filters.classification}`);
             return false;
         }
         
-        // Search filter
+        // Search filter - search by name or description
         if (filters.search) {
             const searchLower = filters.search.toLowerCase();
-            return resource.title.toLowerCase().includes(searchLower) || 
-                   (resource.description && resource.description.toLowerCase().includes(searchLower));
+            const resourceName = resource.name || resource.title || '';
+            const resourceDesc = resource.description || '';
+            
+            const matches = resourceName.toLowerCase().includes(searchLower) || 
+                   resourceDesc.toLowerCase().includes(searchLower);
+            
+            if (!matches) {
+                console.log(`Skipping ${resource.name} - doesn't match search "${filters.search}"`);
+            }
+            return matches;
         }
         
         return true;
     });
+    
+    console.log(`Filtered to ${filtered.length} resources`);
+    return filtered;
 }
 
-// Render individual resource card
 function renderResourceCard(resource) {
+    // Use resource.tier instead of resource.classification
     let classificationClass = 'classification-public';
     let classificationText = 'PUBLIC';
     
-    if (resource.classification === 'DEPARTMENT') {
+    if (resource.tier === 'DEPARTMENT') {
         classificationClass = 'classification-department';
         classificationText = 'DEPARTMENT';
-    } else if (resource.classification === 'TOP_SECRET') {
+    } else if (resource.tier === 'TOP_SECRET') {
         classificationClass = 'classification-top-secret';
         classificationText = 'TOP SECRET';
     }
+    
+    // Generate a description if not present
+    const description = resource.description || `${resource.name} - ${classificationText} government document`;
     
     // Check if user can access this resource
     const canAccess = checkAccessPermission(resource);
@@ -410,7 +455,7 @@ function renderResourceCard(resource) {
         buttonText = '🚫 Access Denied';
         buttonDisabled = true;
         buttonClass = 'access-denied';
-    } else if (resource.classification === 'TOP_SECRET' && !isBusinessHours) {
+    } else if (resource.tier === 'TOP_SECRET' && !isBusinessHours) {
         buttonText = '⏰ Time Restricted';
         buttonDisabled = true;
         buttonClass = 'access-pending';
@@ -419,14 +464,14 @@ function renderResourceCard(resource) {
     return `
         <div class="resource-card">
             <div class="resource-header">
-                <h3 class="resource-title">${resource.title}</h3>
+                <h3 class="resource-title">${resource.name || resource.title}</h3>
                 <span class="classification-badge ${classificationClass}">
                     ${classificationText}
                 </span>
             </div>
             
             <div class="resource-info">
-                <p>${resource.description || 'No description available'}</p>
+                <p>${description}</p>
                 
                 <div class="info-row">
                     <span class="info-label">Department:</span>
@@ -437,21 +482,14 @@ function renderResourceCard(resource) {
                 </div>
                 
                 <div class="info-row">
-                    <span class="info-label">Category:</span>
-                    <span>${resource.category || 'General'}</span>
+                    <span class="info-label">Classification:</span>
+                    <span>${resource.tier}</span>
                 </div>
                 
+                ${resource.restricted ? `
                 <div class="info-row">
-                    <span class="info-label">Created:</span>
-                    <span>${new Date(resource.created_at).toLocaleDateString()}</span>
-                </div>
-                
-                ${resource.classification === 'TOP_SECRET' ? `
-                <div class="info-row">
-                    <span class="info-label">Access Hours:</span>
-                    <span style="color: ${isBusinessHours ? '#4caf50' : '#f44336'}; font-weight: bold;">
-                        ${isBusinessHours ? '✅ Within business hours' : '❌ Outside business hours (8AM-4PM only)'}
-                    </span>
+                    <span class="info-label">Status:</span>
+                    <span style="color: #f44336; font-weight: bold;">⏰ Time Restricted</span>
                 </div>
                 ` : ''}
             </div>
@@ -462,7 +500,7 @@ function renderResourceCard(resource) {
                 ${buttonText}
             </button>
             
-            ${!canAccess || (resource.classification === 'TOP_SECRET' && !isBusinessHours) ? `
+            ${!canAccess || (resource.tier === 'TOP_SECRET' && !isBusinessHours) ? `
             <p style="color: #666; font-size: 0.9rem; margin-top: 0.5rem; padding: 0.5rem; background: #f9f9f9; border-radius: 3px;">
                 ${getAccessDeniedReason(resource)}
             </p>
@@ -476,17 +514,17 @@ function checkAccessPermission(resource) {
     const userClearance = currentUser.clearance_level.toUpperCase();
     
     // PUBLIC: Everyone can access
-    if (resource.classification === 'PUBLIC') {
+    if (resource.tier === 'PUBLIC') {
         return true;
     }
     
     // DEPARTMENT: Only same department
-    if (resource.classification === 'DEPARTMENT') {
+    if (resource.tier === 'DEPARTMENT') {
         return resource.department === currentUser.department;
     }
     
     // TOP_SECRET: Check multiple conditions
-    if (resource.classification === 'TOP_SECRET') {
+    if (resource.tier === 'TOP_SECRET') {
         // 1. Must be MOD department
         if (resource.department !== 'MOD') {
             return false;
@@ -513,17 +551,19 @@ function checkAccessPermission(resource) {
     
     return false;
 }
+
+
 // Get reason for access denial
 function getAccessDeniedReason(resource) {
     const userClearance = currentUser.clearance_level.toUpperCase();
     
-    if (resource.classification === 'DEPARTMENT') {
+    if (resource.tier === 'DEPARTMENT') {  // ← Change from classification to tier
         if (resource.department !== currentUser.department) {
             return `🔒 Department restricted: ${resource.department} personnel only`;
         }
     }
     
-    if (resource.classification === 'TOP_SECRET') {
+    if (resource.tier === 'TOP_SECRET') {  // ← Change from classification to tier
         if (resource.department !== 'MOD') {
             return '🔒 TOP SECRET resources are MOD department only';
         }
@@ -547,9 +587,10 @@ function getAccessDeniedReason(resource) {
 
 // Update filter values
 function updateFilter(type, value) {
-    filters[type] = value;
+     filters[type] = value;
+    
+    renderPortal();
 }
-
 // Apply filters and re-render
 function applyFilters() {
     renderPortal();
@@ -570,7 +611,10 @@ async function requestResourceAccess(resourceId) {
         const token = localStorage.getItem('access_token');
         const response = await fetch(`/api/resources/${resourceId}/access`, {
             method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}` }
+            headers: { 
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
         });
         
         if (!response.ok) {
@@ -583,10 +627,12 @@ async function requestResourceAccess(resourceId) {
         
         if (result.requires_approval) {
             alert('Access request submitted for JIT approval');
-        } else {
+        } else if (result.access_granted) {
             alert('✅ Access granted! Opening resource...');
-            // In real implementation, would open the resource
+            // Open the view endpoint
             window.open(`/api/resources/${resourceId}/view`, '_blank');
+        } else {
+            alert('Access request processed');
         }
         
     } catch (error) {

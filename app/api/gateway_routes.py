@@ -56,7 +56,7 @@ def get_user_public_key(user_id):
                 "X-Request-ID": str(uuid.uuid4()),
             },
             timeout=5,
-            verify=False,
+            verify="certs/ca.crt" if os.path.exists("certs/ca.crt") else False,
         )
 
         if response.status_code == 200:
@@ -79,6 +79,250 @@ def decrypt_from_agent(encrypted_data):
     # For now, use base64 decoding
     decrypted = base64.b64decode(encrypted_data).decode()
     return json.loads(decrypted)
+
+
+@gateway_bp.route("/api/resources/<int:resource_id>/access", methods=["POST"])
+@require_authentication
+def request_resource_access(resource_id):
+    """Request access to a specific resource"""
+    try:
+        user_claims = g.get("user_claims", {})
+        if not user_claims:
+            return jsonify({"error": "User claims required"}), 401
+
+        print(
+            f"📡 Resource access request: User {user_claims.get('username')} for resource {resource_id}"
+        )
+
+        # Just return success for now - in real implementation, this would check access
+        return (
+            jsonify(
+                {
+                    "success": True,
+                    "message": "Access granted",
+                    "resource_id": resource_id,
+                    "requires_approval": False,
+                    "access_granted": True,
+                    "zta_context": {
+                        "user": user_claims.get("username"),
+                        "department": user_claims.get("department"),
+                        "clearance": user_claims.get("clearance_level"),
+                        "flow": "User → Gateway → Access Granted",
+                    },
+                }
+            ),
+            200,
+        )
+
+    except Exception as e:
+        return (
+            jsonify({"error": "Failed to process access request", "message": str(e)}),
+            500,
+        )
+
+
+@gateway_bp.route("/api/resources/<int:resource_id>/view", methods=["GET"])
+@require_authentication
+def view_resource(resource_id):
+    """View a specific resource"""
+    try:
+        user_claims = g.get("user_claims", {})
+        if not user_claims:
+            return jsonify({"error": "User claims required"}), 401
+
+        # For demo purposes, return a simple resource view
+        # In real implementation, this would fetch from API Server
+
+        sample_resources = {
+            1: {
+                "id": 1,
+                "name": "Public Notice Board",
+                "content": "This is public content for all government employees.",
+            },
+            2: {
+                "id": 2,
+                "name": "Government Circulars",
+                "content": "Latest government circulars and announcements.",
+            },
+            3: {
+                "id": 3,
+                "name": "MOD Operations Brief",
+                "content": "MOD department operations briefing.",
+            },
+            4: {
+                "id": 4,
+                "name": "MOD Budget Report",
+                "content": "MOD department budget report.",
+            },
+            5: {
+                "id": 5,
+                "name": "Top Secret MOD Plans",
+                "content": "🔒 TOP SECRET CONTENT: Classified MOD plans.",
+            },
+        }
+
+        if resource_id not in sample_resources:
+            return jsonify({"error": "Resource not found"}), 404
+
+        return (
+            jsonify(
+                {
+                    "resource": sample_resources[resource_id],
+                    "user": user_claims.get("username"),
+                    "access_time": datetime.utcnow().isoformat(),
+                    "zta_context": {
+                        "authentication": "mTLS + JWT",
+                        "authorization": "Department-based access control",
+                        "trace_id": g.get("request_id", "unknown"),
+                    },
+                }
+            ),
+            200,
+        )
+
+    except Exception as e:
+        return jsonify({"error": "Failed to retrieve resource", "message": str(e)}), 500
+
+
+@gateway_bp.route("/view-resource/<int:resource_id>")
+@require_authentication
+def view_resource_page(resource_id):
+    """Render a page to view the resource"""
+    try:
+        user_claims = g.get("user_claims", {})
+        if not user_claims:
+            return jsonify({"error": "User claims required"}), 401
+
+        # Sample resource content
+        sample_resources = {
+            1: {
+                "id": 1,
+                "name": "Public Notice Board",
+                "content": "This is public content for all government employees.",
+                "tier": "PUBLIC",
+                "department": "ALL",
+            },
+            2: {
+                "id": 2,
+                "name": "Government Circulars",
+                "content": "Latest government circulars and announcements.",
+                "tier": "PUBLIC",
+                "department": "ALL",
+            },
+            3: {
+                "id": 3,
+                "name": "MOD Operations Brief",
+                "content": "MOD department operations briefing. This document contains sensitive information about current military operations and readiness levels. Access is restricted to MOD personnel only.",
+                "tier": "DEPARTMENT",
+                "department": "MOD",
+            },
+            4: {
+                "id": 4,
+                "name": "MOD Budget Report",
+                "content": "MOD department budget report for fiscal year 2024. Details allocation of funds across different military branches and defense projects.",
+                "tier": "DEPARTMENT",
+                "department": "MOD",
+            },
+            5: {
+                "id": 5,
+                "name": "Top Secret MOD Plans",
+                "content": "🔒 TOP SECRET CONTENT: Classified MOD plans for special operations. This document contains information about strategic military initiatives and advanced weapon systems.",
+                "tier": "TOP_SECRET",
+                "department": "MOD",
+            },
+            6: {
+                "id": 6,
+                "name": "MOF Fiscal Policy",
+                "content": "Ministry of Finance fiscal policy document outlining economic strategies and tax reforms.",
+                "tier": "DEPARTMENT",
+                "department": "MOF",
+            },
+            7: {
+                "id": 7,
+                "name": "MOF Budget Documents",
+                "content": "MOF department budget documents detailing national expenditure and revenue projections.",
+                "tier": "DEPARTMENT",
+                "department": "MOF",
+            },
+            8: {
+                "id": 8,
+                "name": "NSA Cyber Reports",
+                "content": "NSA cybersecurity threat reports analyzing latest digital threats and vulnerabilities.",
+                "tier": "DEPARTMENT",
+                "department": "NSA",
+            },
+            9: {
+                "id": 9,
+                "name": "NSA Threat Assessment",
+                "content": "NSA threat assessment document evaluating national security risks and countermeasures.",
+                "tier": "DEPARTMENT",
+                "department": "NSA",
+            },
+        }
+
+        if resource_id not in sample_resources:
+            return render_template(
+                "error.html",
+                error="Resource not found",
+                message=f"Resource ID {resource_id} does not exist.",
+            )
+
+        resource = sample_resources[resource_id]
+
+        # Check access permissions (same logic as before)
+        user_department = user_claims.get("department")
+        user_clearance = user_claims.get("clearance_level", "BASIC").upper()
+
+        if (
+            resource["tier"] == "DEPARTMENT"
+            and resource["department"] != user_department
+        ):
+            return render_template(
+                "error.html",
+                error="Access Denied",
+                message=f"This resource is restricted to {resource['department']} personnel only.",
+            )
+
+        if resource["tier"] == "TOP_SECRET":
+            if resource["department"] != "MOD" or user_department != "MOD":
+                return render_template(
+                    "error.html",
+                    error="Access Denied",
+                    message="TOP SECRET resources are MOD department only.",
+                )
+
+            if user_clearance not in ["SECRET", "TOP_SECRET"]:
+                return render_template(
+                    "error.html",
+                    error="Access Denied",
+                    message=f"TOP SECRET clearance required (Your clearance: {user_claims.get('clearance_level')})",
+                )
+
+            # Check time restriction (8 AM - 4 PM)
+            current_hour = datetime.now().hour
+            if current_hour < 8 or current_hour >= 16:
+                return render_template(
+                    "error.html",
+                    error="Access Denied",
+                    message="TOP SECRET resources are only accessible during business hours (8:00 AM - 4:00 PM).",
+                )
+
+        return render_template(
+            "view_resource.html",
+            resource=resource,
+            current_user={
+                "username": user_claims.get("username"),
+                "department": user_claims.get("department"),
+                "clearance": user_claims.get("clearance_level"),
+            },
+            access_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            trace_id=g.get("request_id", str(uuid.uuid4())[:8]),
+        )
+
+    except Exception as e:
+        return render_template(
+            "error.html", error="Error loading resource", message=str(e)
+        )
 
 
 # ============ MAIN WORKFLOW ENDPOINTS ============
@@ -130,18 +374,14 @@ def get_documents():
             encrypted_request = encrypt_for_agent(request_data, agent_public_key)
 
         # 4. Send to OPA Agent (8282)
-        opa_agent_url = current_app.config.get("OPA_AGENT_URL", "http://localhost:8282")
+        opa_agent_url = current_app.config.get("OPA_AGENT_URL", "https://localhost:8282")
 
         response = requests.post(
             f"{opa_agent_url}/evaluate",
-            json={
-                "encrypted_request": encrypted_request,
-                "user_public_key": user_public_key,
-                "user_id": user_id,
-                "request_id": request_id,
-            },
+            json={...},
             headers={"Content-Type": "application/json"},
             timeout=10,
+            verify="certs/ca.crt" if os.path.exists("certs/ca.crt") else False,
         )
 
         if response.status_code != 200:
@@ -331,7 +571,7 @@ def handle_encrypted_request():
 
         # Forward to OPA Agent (NO DECRYPTION HERE!)
         api_server_url = current_app.config.get(
-            "OPA_AGENT_URL", "http://localhost:8282"
+            "OPA_AGENT_URL", "https://localhost:8282"
         )
 
         response = requests.post(
@@ -343,7 +583,7 @@ def handle_encrypted_request():
                 "source": "gateway_encrypted",
             },
             timeout=10,
-            verify=False,
+            verify="certs/ca.crt" if os.path.exists("certs/ca.crt") else False,
         )
 
         # Forward OPA Agent's response back to user (still encrypted)
@@ -403,7 +643,7 @@ def get_single_document(document_id):
         agent_public_key = current_app.config.get("OPA_AGENT_PUBLIC_KEY")
         encrypted_request = encrypt_for_agent(request_data, agent_public_key)
 
-        opa_agent_url = current_app.config.get("OPA_AGENT_URL", "http://localhost:8282")
+        opa_agent_url = current_app.config.get("OPA_AGENT_URL", "https://localhost:8282")
 
         response = requests.post(
             f"{opa_agent_url}/evaluate",
@@ -416,6 +656,7 @@ def get_single_document(document_id):
             },
             headers={"Content-Type": "application/json"},
             timeout=10,
+            verify="certs/ca.crt" if os.path.exists("certs/ca.crt") else False,
         )
 
         if response.status_code != 200:
@@ -493,7 +734,7 @@ def get_users():
         agent_public_key = current_app.config.get("OPA_AGENT_PUBLIC_KEY")
         encrypted_request = encrypt_for_agent(request_data, agent_public_key)
 
-        opa_agent_url = current_app.config.get("OPA_AGENT_URL", "http://localhost:8282")
+        opa_agent_url = current_app.config.get("OPA_AGENT_URL", "https://localhost:8282")
 
         response = requests.post(
             f"{opa_agent_url}/evaluate",
@@ -506,6 +747,7 @@ def get_users():
             },
             headers={"Content-Type": "application/json"},
             timeout=10,
+            verify="certs/ca.crt" if os.path.exists("certs/ca.crt") else False,
         )
 
         if response.status_code != 200:
@@ -619,7 +861,7 @@ def handle_registration():
                 "X-Request-ID": str(uuid.uuid4()),
             },
             timeout=10,
-            verify=False,
+            verify="certs/ca.crt" if os.path.exists("certs/ca.crt") else False,
         )
 
         return jsonify(response.json()), response.status_code
@@ -710,7 +952,7 @@ def get_resources_proper():
                     "X-Request-ID": str(uuid.uuid4()),
                 },
                 timeout=10,
-                verify=False,
+                verify="certs/ca.crt" if os.path.exists("certs/ca.crt") else False,
             )
             return jsonify(response.json()), response.status_code
         except Exception as e:

@@ -467,54 +467,88 @@ subjectAltName = email:{email}
 
     def generate_opa_agent_keys(self):
         """Generate RSA keys for OPA Agent (simplified)"""
-        agent_key_dir = os.path.join(self.cert_dir, "opa_agent")
-        os.makedirs(agent_key_dir, exist_ok=True)
+        try:
+            print("🔑 DEBUG: Starting OPA Agent key generation...")
+            agent_key_dir = os.path.join(self.cert_dir, "opa_agent")
+            os.makedirs(agent_key_dir, exist_ok=True)
+            print(f"🔑 DEBUG: Directory: {agent_key_dir}")
 
-        # Generate private key
-        private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048,
-        )
+            # Generate private key
+            print("🔑 DEBUG: Generating RSA private key...")
+            private_key = rsa.generate_private_key(
+                public_exponent=65537,
+                key_size=2048,
+            )
 
-        # Generate public key
-        public_key = private_key.public_key()
+            # Generate public key
+            print("🔑 DEBUG: Generating RSA public key...")
+            public_key = private_key.public_key()
 
-        # Serialize keys
-        private_pem = private_key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.NoEncryption(),
-        )
+            # Serialize keys
+            print("🔑 DEBUG: Serializing keys...")
+            private_pem = private_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption(),
+            )
 
-        public_pem = public_key.public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo,
-        )
+            public_pem = public_key.public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo,
+            )
 
-        # Save to files
-        private_key_path = os.path.join(agent_key_dir, "private.pem")
-        public_key_path = os.path.join(agent_key_dir, "public.pem")
+            # Save to files
+            private_key_path = os.path.join(agent_key_dir, "private.pem")
+            public_key_path = os.path.join(agent_key_dir, "public.pem")
 
-        with open(private_key_path, "wb") as f:
-            f.write(private_pem)
+            with open(private_key_path, "wb") as f:
+                f.write(private_pem)
 
-        with open(public_key_path, "wb") as f:
-            f.write(public_pem)
+            with open(public_key_path, "wb") as f:
+                f.write(public_pem)
 
-        print(f"✓ OPA Agent keys generated in: {agent_key_dir}")
-        return public_pem.decode("utf-8")
+            print(f"✅ OPA Agent keys generated in: {agent_key_dir}")
+            print(f"✅ Public key length: {len(public_pem)} bytes")
+            print(f"✅ Public key preview: {public_pem[:100].decode()}...")
+
+            return public_pem.decode("utf-8")
+
+        except Exception as e:
+            print(f"❌ ERROR in generate_opa_agent_keys: {e}")
+            import traceback
+
+            traceback.print_exc()
+            return None  # ← This returns None!
 
     def load_opa_agent_public_key(self):
         """Load OPA Agent's public key - GENERATE IF NOT EXISTS"""
         public_key_path = os.path.join(self.cert_dir, "opa_agent", "public.pem")
 
         if os.path.exists(public_key_path):
-            with open(public_key_path, "r") as f:
-                return f.read()
+            try:
+                with open(public_key_path, "r") as f:
+                    key = f.read()
+                if key and key.startswith("-----BEGIN PUBLIC KEY-----"):
+                    print(f"✅ Loaded existing OPA Agent public key ({len(key)} chars)")
+                    return key
+                else:
+                    print("⚠️ Existing key is invalid, regenerating...")
+            except Exception as e:
+                print(f"⚠️ Error loading existing key: {e}")
 
-        # 🔥 CRITICAL FIX: Generate keys if they don't exist
+        # Generate new keys
         print("⚠️ OPA Agent keys not found - generating now...")
-        return self.generate_opa_agent_keys()
+        try:
+            key = self.generate_opa_agent_keys()
+            if key and key.startswith("-----BEGIN PUBLIC KEY-----"):
+                print(f"✅ Generated new OPA Agent public key ({len(key)} chars)")
+                return key
+            else:
+                print("❌ Failed to generate valid key")
+                return None
+        except Exception as e:
+            print(f"❌ Failed to generate OPA Agent keys: {e}")
+            return None
 
     def create_p12_bundle(self, user_id, p12_password):
         """Create PKCS12 bundle for browser import"""

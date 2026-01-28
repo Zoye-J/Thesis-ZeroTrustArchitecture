@@ -262,7 +262,7 @@ def handle_login_api_mode(username, password, request_id):
 
 def handle_login_gateway_mode(username, password, request_id):
     """Gateway Server login - calls API Server"""
-    api_server_url = current_app.config.get("API_SERVER_URL", "http://localhost:5001")
+    api_server_url = current_app.config.get("API_SERVER_URL", "https://localhost:5001")
 
     try:
         # Call API Server's login endpoint
@@ -320,7 +320,7 @@ def refresh():
         else:
             # Gateway mode - call API Server
             api_server_url = current_app.config.get(
-                "API_SERVER_URL", "http://localhost:5001"
+                "API_SERVER_URL", "https://localhost:5001"
             )
 
             try:
@@ -385,7 +385,7 @@ def get_current_user():
     else:
         # Gateway mode - call API Server
         api_server_url = current_app.config.get(
-            "API_SERVER_URL", "http://localhost:5001"
+            "API_SERVER_URL", "https://localhost:5001"
         )
 
         try:

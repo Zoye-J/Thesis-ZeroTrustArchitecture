@@ -229,9 +229,9 @@ def setup_database():
             print("-" * 60)
 
             print("\nZTA ARCHITECTURE PORTS:")
-            print("• Main Server (JWT): http://localhost:5000")
+            print("• Main Server (JWT): https://localhost:5000")
             print("• API Server (mTLS): https://localhost:8443")
-            print("• OPA Agent: http://localhost:8181")
+            print("• OPA Agent: https://localhost:8181")
             print("=" * 60)
 
     except Exception as e:

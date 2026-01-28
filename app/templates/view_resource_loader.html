@@ -1,0 +1,383 @@
+{% extends "base.html" %}
+
+{% block title %}Loading Resource - Government ZTA System{% endblock %}
+
+{% block extra_css %}
+<style>
+    .zta-flow-diagram {
+        background: #f8f9fa;
+        border-radius: 10px;
+        padding: 2rem;
+        margin: 2rem 0;
+        border: 1px solid #dee2e6;
+    }
+    
+    .flow-step {
+        display: flex;
+        align-items: center;
+        margin: 1rem 0;
+        padding: 1rem;
+        background: white;
+        border-radius: 5px;
+        border-left: 4px solid #6c757d;
+    }
+    
+    .flow-step.active {
+        border-left-color: #0d6efd;
+        background: #e7f1ff;
+    }
+    
+    .flow-step.completed {
+        border-left-color: #198754;
+        background: #d1e7dd;
+    }
+    
+    .flow-step.failed {
+        border-left-color: #dc3545;
+        background: #f8d7da;
+    }
+    
+    .step-number {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        background: #6c757d;
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        margin-right: 1rem;
+    }
+    
+    .step-number.active { background: #0d6efd; }
+    .step-number.completed { background: #198754; }
+    .step-number.failed { background: #dc3545; }
+    
+    .spinner-large {
+        width: 4rem;
+        height: 4rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="text-center mb-4">
+        <div class="spinner-border spinner-large text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+        <h3 class="mt-3">Loading Resource Through ZTA Flow</h3>
+        <p class="text-muted">Fetching through Zero Trust Authorization encryption flow</p>
+        <div class="badge bg-primary">Trace ID: {{ trace_id }}</div>
+    </div>
+    
+    <div class="zta-flow-diagram">
+        <h5>Zero Trust Authorization Flow:</h5>
+        
+        <div id="flow-steps">
+            <div class="flow-step" id="step-1">
+                <div class="step-number">1</div>
+                <div>
+                    <strong>Authentication</strong><br>
+                    <small>JWT + mTLS verification</small>
+                    <div class="step-status"></div>
+                </div>
+            </div>
+            
+            <div class="flow-step" id="step-2">
+                <div class="step-number">2</div>
+                <div>
+                    <strong>Encrypt Request</strong><br>
+                    <small>Encrypting with OPA Agent public key</small>
+                    <div class="step-status"></div>
+                </div>
+            </div>
+            
+            <div class="flow-step" id="step-3">
+                <div class="step-number">3</div>
+                <div>
+                    <strong>Policy Evaluation</strong><br>
+                    <small>OPA Server checking access policies</small>
+                    <div class="step-status"></div>
+                </div>
+            </div>
+            
+            <div class="flow-step" id="step-4">
+                <div class="step-number">4</div>
+                <div>
+                    <strong>Fetch Resource</strong><br>
+                    <small>Retrieving from API Server</small>
+                    <div class="step-status"></div>
+                </div>
+            </div>
+            
+            <div class="flow-step" id="step-5">
+                <div class="step-number">5</div>
+                <div>
+                    <strong>Encrypt Response</strong><br>
+                    <small>Encrypting with your public key</small>
+                    <div class="step-status"></div>
+                </div>
+            </div>
+            
+            <div class="flow-step" id="step-6">
+                <div class="step-number">6</div>
+                <div>
+                    <strong>Display Resource</strong><br>
+                    <small>Decrypting and rendering content</small>
+                    <div class="step-status"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div id="zta-flow-result" class="mt-4"></div>
+    <div id="resource-content" class="mt-4 d-none"></div>
+</div>
+
+<script type="application/json" id="template-data">
+{
+    "resource_id": {{ resource_id }},
+    "trace_id": "{{ trace_id }}",
+    "user_claims": {{ user_claims|tojson|safe }}
+}
+</script>
+
+<script>
+// ========== CONFIGURATION ==========
+const templateData = JSON.parse(document.getElementById('template-data').textContent);
+const resourceId = templateData.resource_id;
+const traceId = templateData.trace_id;
+const userClaims = templateData.user_claims || {};
+
+console.log('ZTA Flow Initialized:', { resourceId, traceId, userClaims });
+
+// ========== FLOW VISUALIZATION ==========
+function updateStep(stepNumber, status, message = '') {
+    const step = document.getElementById(`step-${stepNumber}`);
+    if (!step) return;
+    
+    const stepNumberEl = step.querySelector('.step-number');
+    const statusEl = step.querySelector('.step-status');
+    
+    step.classList.remove('active', 'completed', 'failed');
+    stepNumberEl.classList.remove('active', 'completed', 'failed');
+    
+    if (status === 'active') {
+        step.classList.add('active');
+        stepNumberEl.classList.add('active');
+        if (statusEl) statusEl.innerHTML = `<small class="text-primary">⏳ ${message}</small>`;
+    } else if (status === 'completed') {
+        step.classList.add('completed');
+        stepNumberEl.classList.add('completed');
+        if (statusEl) statusEl.innerHTML = `<small class="text-success">✅ ${message}</small>`;
+    } else if (status === 'failed') {
+        step.classList.add('failed');
+        stepNumberEl.classList.add('failed');
+        if (statusEl) statusEl.innerHTML = `<small class="text-danger">❌ ${message}</small>`;
+    }
+}
+
+// ========== OPA AGENT FLOW ==========
+async function fetchResourceThroughOPA() {
+    try {
+        updateStep(1, 'active', 'Authenticating...');
+        
+        // Step 1: Check authentication
+        const token = localStorage.getItem('access_token');
+        if (!token) {
+            throw new Error('Not authenticated. Please login again.');
+        }
+        
+        updateStep(1, 'completed', 'JWT verified');
+        updateStep(2, 'active', 'Encrypting request...');
+        
+        // Step 2: Fetch through OPA Agent encrypted flow
+        const response = await fetch(`/api/resources/${resourceId}`, {
+            headers: { 
+                'Authorization': `Bearer ${token}`,
+                'X-Trace-ID': traceId
+            }
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`HTTP ${response.status}: ${errorText}`);
+        }
+        
+        const data = await response.json();
+        updateStep(2, 'completed', 'Request encrypted');
+        
+        // Step 3: Check if response is encrypted
+        if (data.encrypted_payload) {
+            updateStep(3, 'active', 'Policy evaluation in progress...');
+            
+            // Small delay to show policy evaluation
+            setTimeout(async () => {
+                updateStep(3, 'completed', 'Policy check passed');
+                updateStep(4, 'active', 'Fetching resource...');
+                
+                // Decrypt the response
+                await decryptAndDisplay(data.encrypted_payload);
+            }, 800);
+            
+        } else {
+            // Direct response (for testing or fallback)
+            updateStep(3, 'completed', 'Policy check passed');
+            updateStep(4, 'completed', 'Resource fetched');
+            updateStep(5, 'completed', 'Response ready');
+            updateStep(6, 'completed', 'Content displayed');
+            displayResource(data);
+        }
+        
+    } catch (error) {
+        console.error('OPA flow error:', error);
+        updateStep(1, 'failed', 'Authentication failed');
+        showError(`Failed to load resource: ${error.message}`);
+    }
+}
+
+// ========== DECRYPTION ==========
+async function decryptAndDisplay(encryptedPayload) {
+    try {
+        updateStep(5, 'active', 'Decrypting response...');
+        
+        // Check if encryption is available
+        if (!window.ztaEncryptor) {
+            throw new Error('ZTA encryption library not loaded');
+        }
+        
+        if (!window.ztaEncryptor.initialized) {
+            // Try to initialize
+            await window.ztaEncryptor.init();
+        }
+        
+        // Use ZTA encryption library to decrypt
+        const decrypted = await window.ztaEncryptor.decryptFromAgent(encryptedPayload);
+        
+        updateStep(5, 'completed', 'Response decrypted');
+        updateStep(6, 'active', 'Rendering content...');
+        
+        if (decrypted.allowed && decrypted.api_response && decrypted.api_response.data) {
+            // Access granted
+            setTimeout(() => {
+                updateStep(6, 'completed', 'Content displayed');
+                displayResource(decrypted.api_response.data);
+            }, 300);
+        } else {
+            // Access denied
+            updateStep(3, 'failed', 'Policy denied access');
+            showError(`Access denied: ${decrypted.reason || 'Policy violation'}`);
+        }
+        
+    } catch (error) {
+        console.error('Decryption error:', error);
+        updateStep(5, 'failed', 'Decryption error');
+        showError(`Decryption failed: ${error.message}`);
+    }
+}
+
+// ========== DISPLAY RESOURCE ==========
+function displayResource(resourceData) {
+    const contentDiv = document.getElementById('resource-content');
+    const resultDiv = document.getElementById('zta-flow-result');
+    
+    // Hide flow result
+    if (resultDiv) resultDiv.innerHTML = '';
+    
+    // Escape HTML to prevent XSS
+    const escapeHtml = (text) => {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    };
+    
+    // Show resource content
+    const html = `
+        <div class="card">
+            <div class="card-header">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h4 class="mb-0">${escapeHtml(resourceData.name || resourceData.title || 'Unknown Resource')}</h4>
+                    <span class="badge bg-${resourceData.tier === 'PUBLIC' ? 'success' : resourceData.tier === 'DEPARTMENT' ? 'primary' : 'danger'}">
+                        ${escapeHtml(resourceData.tier || 'UNKNOWN')}
+                    </span>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Department:</strong> ${escapeHtml(resourceData.department || 'Unknown')}
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Access Time:</strong> ${new Date().toLocaleString()}
+                    </div>
+                </div>
+                
+                <div class="alert alert-success">
+                    <strong>✅ Access Granted via ZTA Flow</strong><br>
+                    User: ${escapeHtml(userClaims.username || 'Unknown')} (${escapeHtml(userClaims.department || 'Unknown')})
+                </div>
+                
+                <div class="resource-content mt-4 p-3 border rounded bg-light">
+                    <h5>Content:</h5>
+                    <p>${escapeHtml(resourceData.content || 'No content available')}</p>
+                </div>
+                
+                <div class="mt-4">
+                    <a href="/resources" class="btn btn-primary">Back to Resources</a>
+                    <a href="/dashboard" class="btn btn-secondary ms-2">Dashboard</a>
+                </div>
+                
+                <div class="mt-4 p-3 border-top">
+                    <small class="text-muted">
+                        <strong>ZTA Context:</strong> 
+                        Authentication: mTLS + JWT | 
+                        Authorization: Department-based access control |
+                        Trace ID: ${escapeHtml(traceId)}
+                    </small>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    if (contentDiv) {
+        contentDiv.innerHTML = html;
+        contentDiv.classList.remove('d-none');
+    }
+}
+
+// ========== ERROR HANDLING ==========
+function showError(message) {
+    const resultDiv = document.getElementById('zta-flow-result');
+    if (!resultDiv) return;
+    
+    resultDiv.innerHTML = `
+        <div class="alert alert-danger">
+            <h5>❌ ZTA Flow Failed</h5>
+            <p>${escapeHtml(message)}</p>
+            <div class="mt-2">
+                <a href="/resources" class="btn btn-outline-danger">Back to Resources</a>
+                <button onclick="fetchResourceThroughOPA()" class="btn btn-primary ms-2">Retry</button>
+            </div>
+        </div>
+    `;
+}
+
+// Helper function for HTML escaping
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// ========== INITIALIZATION ==========
+document.addEventListener('DOMContentLoaded', () => {
+    // Start the OPA flow with a small delay
+    setTimeout(fetchResourceThroughOPA, 300);
+});
+</script>
+
+{% endblock %}

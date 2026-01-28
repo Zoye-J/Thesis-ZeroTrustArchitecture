@@ -64,6 +64,21 @@ def create_opa_agent_app():
             )
 
             logger.info(f"[{request_id}] OPA Agent received request")
+            # DEBUG: Log what we received
+            logger.info(
+                f"[{request_id}] Encrypted data length: {len(data.get('encrypted_request', ''))}"
+            )
+            logger.info(
+                f"[{request_id}] User public key present: {'yes' if 'user_public_key' in data else 'no'}"
+            )
+
+            # Step 1: Decrypt request with agent's private key
+            encrypted_request = data["encrypted_request"]
+
+            # DEBUG: Show first 100 chars of encrypted data
+            logger.info(
+                f"[{request_id}] Encrypted data (first 100): {encrypted_request[:100]}"
+            )
 
             # ============ ADD EVENT LOGGING HERE ============
             # Log when OPA Agent receives request
@@ -139,7 +154,7 @@ def create_opa_agent_app():
                 trace_id=trace_id,
                 details={
                     "request_id": request_id,
-                    "opa_server_url": "http://localhost:8181",
+                    "opa_server_url": "https://localhost:8181",
                 },
                 severity=Severity.INFO,
             )
@@ -212,7 +227,7 @@ def create_opa_agent_app():
                     user_id=request_info.get("user_id"),
                     details={
                         "request_id": request_id,
-                        "api_server_url": "http://localhost:5001",
+                        "api_server_url": "https://localhost:5001",
                         "method": request_info.get("method"),
                         "path": request_info.get("path"),
                     },
@@ -357,10 +372,10 @@ if __name__ == "__main__":
     print("🔐 OPA AGENT SERVER WITH ENCRYPTION")
     print("=" * 60)
     print("📡 Port: 8282")
-    print("🔗 URL: http://localhost:8282")
-    print("🏥 Health: http://localhost:8282/health")
-    print("🔑 Public Key: http://localhost:8282/public-key")
-    print("⚖️  Evaluate: POST http://localhost:8282/evaluate")
+    print("🔗 URL: https://localhost:8282")
+    print("🏥 Health: https://localhost:8282/health")
+    print("🔑 Public Key: https://localhost:8282/public-key")
+    print("⚖️  Evaluate: POST https://localhost:8282/evaluate")
     print("📊 Real-time Events: YES (via Gateway Dashboard)")
     print("=" * 60)
     print("Press Ctrl+C to stop\n")

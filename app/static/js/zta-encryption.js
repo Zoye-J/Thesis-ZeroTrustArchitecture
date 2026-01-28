@@ -20,13 +20,14 @@ class ZTAEncryption {
             
             // 1. Get OPA Agent public key - NO AUTH REQUIRED
             try {
-                const agentKeyResponse = await fetch('/gateway/opa-agent-public-key');
+                const agentKeyResponse = await fetch('/api/opa-agent-public-key');
+                
                 if (agentKeyResponse.ok) {
                     const agentKeyData = await agentKeyResponse.json();
                     this.agentPublicKey = agentKeyData.public_key;
                     console.log('OPA Agent public key loaded');
                 } else {
-                    console.warn('Could not get OPA Agent key, using fallback encryption');
+                    console.warn('⚠️ Could not get OPA Agent key, using fallback encryption');
                 }
             } catch (error) {
                 console.warn('Failed to fetch OPA Agent key:', error);
@@ -693,3 +694,37 @@ document.addEventListener('DOMContentLoaded', async () => {
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = { ZTAEncryption, ZTAAutomatedSetup };
 }
+
+// Ensure ZTA encryption is available for resource viewing
+window.addEventListener('load', async () => {
+    try {
+        // Initialize if not already done
+        if (window.ztaEncryptor && !window.ztaEncryptor.initialized) {
+            await window.ztaEncryptor.init();
+        }
+        
+        if (window.ztaAutomatedSetup && !window.ztaAutomatedSetup.db) {
+            await window.ztaAutomatedSetup.initDB();
+        }
+        
+        console.log('✅ ZTA Security ready for resource viewing');
+    } catch (error) {
+        console.warn('ZTA initialization warning:', error);
+        // Continue anyway - system can work without encryption
+    }
+});
+
+// Helper function for resource decryption
+window.decryptResourceResponse = async function(encryptedPayload) {
+    if (!window.ztaEncryptor || !window.ztaEncryptor.initialized) {
+        throw new Error('ZTA encryption not initialized');
+    }
+    
+    try {
+        const decrypted = await window.ztaEncryptor.decryptFromAgent(encryptedPayload);
+        return decrypted;
+    } catch (error) {
+        console.error('Resource decryption failed:', error);
+        throw error;
+    }
+};

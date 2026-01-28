@@ -8,7 +8,7 @@ import sys
 
 
 class OPAManager:
-    def __init__(self, base_url="http://localhost:8181"):
+    def __init__(self, base_url="https://localhost:8181"):
         self.base_url = base_url
 
     def health(self):

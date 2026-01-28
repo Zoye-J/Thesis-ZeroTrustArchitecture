@@ -13,8 +13,8 @@ class OpaAgent:
         self.crypto = CryptoHandler()
         # Try to load existing keys, generate if not exist
         self.agent_private_key, self.agent_public_key = self._load_or_generate_keys()
-        self.opa_url = "http://localhost:8181"
-        self.api_server_url = "http://localhost:5001"
+        self.opa_url = "https://localhost:8181"
+        self.api_server_url = "https://localhost:5001"
         logger.info("OPA Agent initialized")
 
     def _load_or_generate_keys(self):
@@ -53,47 +53,47 @@ class OpaAgent:
     def evaluate_with_risk(self, request_data):
         """Evaluate request with risk scoring"""
         from app.services.risk_scorer import RiskScorer
-        
+
         # Calculate risk score
         scorer = RiskScorer()
-        resource_sensitivity = request_data.get("resource", {}).get("classification", "PUBLIC")
+        resource_sensitivity = request_data.get("resource", {}).get(
+            "classification", "PUBLIC"
+        )
         risk_score = scorer.calculate_risk(request_data, resource_sensitivity)
         risk_level = scorer.get_risk_level(risk_score)
-        
+
         # Add risk to request data
         request_data["risk"] = {
             "score": risk_score,
             "level": risk_level,
-            "threshold": 50  # Score above 50 requires additional checks
+            "threshold": 50,  # Score above 50 requires additional checks
         }
-        
+
         print(f"📊 Risk Score: {risk_score} ({risk_level})")
-        
+
         # Call OPA Server with risk info
         opa_input = {
             "input": {
                 **request_data,
                 "risk_score": risk_score,
-                "risk_level": risk_level
+                "risk_level": risk_level,
             }
         }
-        
+
         # Send to OPA Server
         response = requests.post(
-            "http://localhost:8181/v1/data/zta/allow",
-            json=opa_input,
-            timeout=5
+            "https://localhost:8181/v1/data/zta/allow", json=opa_input, timeout=5
         )
-        
+
         if response.status_code == 200:
             result = response.json()
             result["risk_assessment"] = {
                 "score": risk_score,
                 "level": risk_level,
-                "factors_considered": ["time", "location", "device", "authentication"]
+                "factors_considered": ["time", "location", "device", "authentication"],
             }
             return result
-        
+
         return {"allow": False, "reason": "OPA Server error"}
 
     def encrypt_response(self, data, user_public_key):
@@ -112,7 +112,13 @@ class OpaAgent:
             # Prepare input for OPA
             opa_input = self._prepare_opa_input(request_data)
 
-            response = requests.post(
+            # Use session with SSL verification disabled (for self-signed certs)
+            import requests
+
+            session = requests.Session()
+            session.verify = False  # Disable SSL verification for self-signed certs
+
+            response = session.post(
                 f"{self.opa_url}/v1/data/zta/allow",
                 json={"input": opa_input},
                 timeout=5,

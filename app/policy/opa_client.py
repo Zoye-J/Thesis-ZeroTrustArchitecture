@@ -2,6 +2,7 @@
 import requests
 import json
 import uuid
+import os
 from flask import current_app, request
 from datetime import datetime
 import logging
@@ -12,14 +13,15 @@ logger = logging.getLogger(__name__)
 
 class OPAClient:
     def __init__(self, opa_url=None, timeout=5):
-        self.opa_url = opa_url or "http://localhost:8181"
+        self.opa_url = opa_url or "https://localhost:8181"
         self.timeout = timeout
         self._initialized = False
+        self.ca_cert_path = "certs/ca.crt"
         logger.info(f"OPA Client initialized with URL: {self.opa_url}")
 
     def init_app(self, app):
         """Initialize with Flask app config"""
-        self.opa_url = app.config.get("OPA_URL", "http://localhost:8181")
+        self.opa_url = app.config.get("OPA_URL", "https://localhost:8181")
         self.timeout = app.config.get("OPA_TIMEOUT", 5)
         self._initialized = True
         logger.info(f"OPA Client configured with URL: {self.opa_url}")
@@ -332,15 +334,20 @@ class OPAClient:
         try:
             url = f"{self.opa_url}/v1/data/{policy_path}"
 
-            # Log the request for debugging
+            # Use SSL verification if CA cert exists
+            verify_ssl = (
+                self.ca_cert_path if os.path.exists(self.ca_cert_path) else False
+            )
+
             logger.debug(f"OPA Request URL: {url}")
-            logger.debug(f"OPA Input: {json.dumps(input_data, indent=2)}")
+            logger.debug(f"SSL Verification: {verify_ssl}")
 
             response = requests.post(
                 url,
                 json={"input": input_data},
                 timeout=self.timeout,
                 headers={"Content-Type": "application/json"},
+                verify=verify_ssl,
             )
 
             if response.status_code == 200:

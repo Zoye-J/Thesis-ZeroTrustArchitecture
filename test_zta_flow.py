@@ -20,7 +20,7 @@ def check_server_health():
         "Gateway (5000)": "https://localhost:5000/login",
         "API Server (5001)": "https://localhost:5001/health",
         "OPA Agent (8282)": "https://localhost:8282/health",
-        "OPA Server (8181)": "http://localhost:8181/health",
+        "OPA Server (8181)": "https://localhost:8181/health",
     }
 
     print("🔍 Checking server health...")
