@@ -1,636 +1,309 @@
 #!/usr/bin/env python3
 """
-Python-based OPA Server for ZTA Thesis
-No Docker required!
+Python OPA Server for ZTA Thesis - FIXED VERSION
+Serves as policy decision engine
 """
-from http.server import HTTPServer, BaseHTTPRequestHandler
+
+import sys
+import os
 import json
 import time
-import sys
-import os
-import re
-from datetime import datetime
-import ssl
-import sys
-import os
+import traceback
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-try:
-    from app.logs.zta_event_logger import event_logger, EventType, Severity
-
-    HAS_LOGGING = True
-except ImportError as e:
-    print(f"⚠️ Event logging disabled: {e}")
-    HAS_LOGGING = False
+from app.ssl_config import create_server_ssl_context
+from app.logs.zta_event_logger import event_logger, EventType, Severity
 
 
-class PythonOPAHandler(BaseHTTPRequestHandler):
-    """Full-featured OPA-compatible server written in Python"""
+class OPARequestHandler(BaseHTTPRequestHandler):
+    def _send_json_response(self, data, status=200):
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps(data).encode("utf-8"))
 
-    # Store policies in memory
-    policies = {}
-    data = {}
-
-    def __init__(self, *args, **kwargs):
-        # Load policies on startup
-        self.load_policies()
-        super().__init__(*args, **kwargs)
-
-    def load_policies(self):
-        """Load Rego policies from file"""
-        policy_file = "app/policy/policies.rego"
-        if os.path.exists(policy_file):
-            try:
-                with open(policy_file, "r") as f:
-                    content = f.read()
-                # Parse package name
-                package_match = re.search(r"package\s+([a-zA-Z0-9_/]+)", content)
-                if package_match:
-                    package_name = package_match.group(1)
-                    self.policies[package_name] = content
-                    print(f"📋 Loaded policy: {package_name}")
-            except Exception as e:
-                print(f"⚠️  Failed to load policies: {e}")
-        else:
-            # Create default policy file
-            self.create_default_policies()
-
-    def create_default_policies(self):
-        """Create default policies if file doesn't exist"""
-        os.makedirs("app/policy", exist_ok=True)
-
-        default_policy = """package zta
-
-import future.keywords
-
-# Default deny everything
-default allow := false
-
-#############################################
-# DOCUMENT ACCESS POLICIES
-#############################################
-
-# Allow superadmin to do anything
-allow {
-    input.user.role == "superadmin"
-    reason := "Superadmin has full access"
-}
-
-# Admin can manage documents in their facility
-allow {
-    input.user.role == "admin"
-    input.resource.type == "document"
-    input.resource.facility == input.user.facility
-    input.action == "read"
-    reason := "Admin can read documents in their facility"
-}
-
-# Regular user access rules
-allow {
-    input.user.role == "user"
-    input.resource.type == "document"
-    input.action == "read"
-    input.resource.department == input.user.department
-    input.resource.facility == input.user.facility
-    
-    # Check clearance level
-    clearance_levels := ["BASIC", "CONFIDENTIAL", "SECRET", "TOP_SECRET"]
-    clearance_index(resource_level) := i {
-        clearance_levels[i] == resource_level
-    }
-    user_clearance_index := clearance_index(input.user.clearance)
-    resource_clearance_index := clearance_index(input.resource.classification)
-    user_clearance_index >= resource_clearance_index
-    
-    reason := sprintf("User has sufficient clearance: %s >= %s", [input.user.clearance, input.resource.classification])
-}
-
-# Users can read their own documents
-allow {
-    input.user.role == "user"
-    input.resource.type == "document"
-    input.action == "read"
-    input.resource.owner == input.user.id
-    reason := "User can read their own documents"
-}
-
-#############################################
-# USER MANAGEMENT POLICIES
-#############################################
-
-user_management := {"allow": true, "reason": "Superadmin can manage any user"} {
-    input.user.role == "superadmin"
-}
-
-user_management := {"allow": true, "reason": "Admin can manage users in their facility"} {
-    input.user.role == "admin"
-    input.action == "read"
-    input.resource.facility == input.user.facility
-}
-"""
-
-        with open("app/policy/policies.rego", "w") as f:
-            f.write(default_policy)
-
-        self.policies["zta"] = default_policy
-        print("📋 Created default policy file")
+    def _log_request(self, event_type, action, user="N/A", details=None):
+        """Helper to log OPA events"""
+        event_logger.log_event(
+            event_type=event_type,
+            source_component="opa_server",
+            action=action,
+            user_id=user,
+            username=user if user != "N/A" else None,
+            details=details,
+            trace_id="unknown",  # Will be overridden if in input
+            severity=Severity.INFO,
+        )
 
     def do_GET(self):
-        """Handle GET requests"""
         if self.path == "/health":
-            self.send_health_response()
-
-        elif self.path == "/v1/policies":
-            self.send_policies_response()
-
-        elif self.path == "/":
-            self.send_welcome_response()
-
-        else:
-            self.send_error_response(404, "Not Found")
-
-    def do_POST(self):
-        """Handle POST requests for policy evaluation"""
-        if self.path.startswith("/v1/data/"):
-            self.handle_policy_evaluation()
-        else:
-            self.send_error_response(404, "Not Found")
-
-    def do_PUT(self):
-        """Handle PUT requests (for loading policies)"""
-        if self.path.startswith("/v1/policies/"):
-            self.handle_upload_policy()
-        else:
-            self.send_error_response(404, "Not Found")
-
-    def send_health_response(self):
-        """Send health check response"""
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        response = {
-            "healthy": True,
-            "version": "1.0.0",
-            "server": "Python OPA Server",
-            "policies_loaded": len(self.policies),
-        }
-        self.wfile.write(json.dumps(response).encode())
-
-    def send_policies_response(self):
-        """Send list of policies"""
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-
-        policy_list = []
-        for package_name, content in self.policies.items():
-            policy_list.append(
+            self._log_request(
+                EventType.API_REQUEST, "Health check", details={"path": self.path}
+            )
+            self._send_json_response(
                 {
-                    "id": package_name,
-                    "raw": content[:500] + "..." if len(content) > 500 else content,
+                    "status": "healthy",
+                    "server": "opa_server",
+                    "timestamp": time.time(),
+                    "policies_loaded": True,
                 }
             )
-
-        response = {"result": policy_list}
-        self.wfile.write(json.dumps(response).encode())
-
-    def send_welcome_response(self):
-        """Send welcome message"""
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        response = {
-            "message": "Python OPA Server for ZTA Thesis",
-            "endpoints": {
-                "GET /health": "Health check",
-                "GET /v1/policies": "List policies",
-                "POST /v1/data/{path}": "Evaluate policy",
-                "PUT /v1/policies/{id}": "Upload policy",
-            },
-            "status": "Running",
-        }
-        self.wfile.write(json.dumps(response).encode())
-
-    def handle_policy_evaluation(self):
-        """Handle policy evaluation requests"""
-        try:
-            content_length = int(self.headers["Content-Length"])
-            post_data = self.rfile.read(content_length)
-            input_data = json.loads(post_data)
-
-            # Extract trace ID if available
-            trace_id = input_data.get("input", {}).get("trace_id", "unknown")
-
-            # Extract policy path from URL
-            path_parts = self.path.split("/")
-            if len(path_parts) >= 4:
-                policy_path = "/".join(path_parts[3:])  # Remove /v1/data/
-            else:
-                policy_path = "zta/allow"
-
-            # LOG REQUEST RECEIVED
-            if HAS_LOGGING:
-                try:
-                    user_info = input_data.get("input", {}).get("user", {})
-                    event_logger.log_event(
-                        event_type=EventType.OPA_REQUEST_SENT,
-                        source_component="opa_server",
-                        action=f"Policy evaluation request received",
-                        user_id=user_info.get("id"),
-                        username=user_info.get("username"),
-                        trace_id=trace_id,
-                        details={
-                            "policy_path": policy_path,
-                            "method": self.command,
-                            "headers": dict(self.headers),
-                        },
-                        severity=Severity.INFO,
-                    )
-                except Exception as e:
-                    print(f"⚠️ Failed to log OPA request: {e}")
-
-            print(f"🔍 Evaluating policy: {policy_path}")
-            print(f"📥 Input: {json.dumps(input_data, indent=2)}")
-
-            # Evaluate policy
-            result = self.evaluate_policy(policy_path, input_data.get("input", {}))
-
-            # LOG RESPONSE SENT
-            if HAS_LOGGING:
-                try:
-                    allowed = result.get("decision", {}).get("allowed", False)
-                    user_info = input_data.get("input", {}).get("user", {})
-                    event_logger.log_event(
-                        event_type=EventType.OPA_RESPONSE_RECEIVED,
-                        source_component="opa_server",
-                        action=f"Policy response sent: {'ALLOW' if allowed else 'DENY'}",
-                        user_id=user_info.get("id"),
-                        username=user_info.get("username"),
-                        trace_id=trace_id,
-                        details={
-                            "decision": result.get("decision", {}),
-                            "policy_path": policy_path,
-                        },
-                        severity=Severity.INFO,
-                    )
-                except Exception as e:
-                    print(f"⚠️ Failed to log OPA response: {e}")
-
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("X-Decision-Id", f"pyopa-{int(time.time())}")
+        elif self.path == "/v1/policies":
+            self._log_request(
+                EventType.POLICY_LOADED, "List policies", details={"path": self.path}
+            )
+            self._send_json_response(
+                {"policies": ["zta/allow"], "loaded_policies": ["zta"]}
+            )
+        else:
+            self.send_response(404)
             self.end_headers()
 
-            self.wfile.write(json.dumps(result).encode())
-
-        except json.JSONDecodeError:
-            self.send_error_response(400, "Invalid JSON")
-        except Exception as e:
-            self.send_error_response(500, f"Evaluation error: {str(e)}")
-
-    def handle_upload_policy(self):
-        """Handle policy upload"""
+    def do_POST(self):
         try:
-            # Extract policy ID from URL
-            path_parts = self.path.split("/")
-            policy_id = path_parts[-1] if len(path_parts) >= 4 else "unknown"
+            if self.path == "/v1/data/zta/allow":
+                content_length = int(self.headers.get("Content-Length", 0))
+                post_data = self.rfile.read(content_length)
 
-            content_length = int(self.headers["Content-Length"])  # FIXED LINE 265
-            policy_content = self.rfile.read(content_length).decode("utf-8")
+                # Parse input
+                try:
+                    data = json.loads(post_data.decode("utf-8"))
+                    input_data = data.get("input", {})
+                except json.JSONDecodeError as e:
+                    self._send_json_response(
+                        {
+                            "result": False,
+                            "reason": f"Invalid JSON: {str(e)}",
+                            "error": "JSON parsing failed",
+                        },
+                        400,
+                    )
+                    return
 
-            # Parse package name from content
-            package_match = re.search(r"package\s+([a-zA-Z0-9_/]+)", policy_content)
-            if package_match:
-                package_name = package_match.group(1)
-                self.policies[package_name] = policy_content
+                # Extract user info - FIXED: Handle both old and new formats
+                user_data = input_data.get("user", {})
+                resource_data = input_data.get("resource", {})
+                environment_data = input_data.get("environment", {})
+                request_id = input_data.get("request_id", "unknown")
 
-                # Also save to file
-                with open("app/policy/policies.rego", "w") as f:
-                    f.write(policy_content)
-
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                response = {"result": f"Policy '{policy_id}' uploaded"}
-                self.wfile.write(json.dumps(response).encode())
-            else:
-                self.send_error_response(400, "Invalid policy: No package declaration")
-
-        except Exception as e:
-            self.send_error_response(500, f"Upload error: {str(e)}")
-
-    def evaluate_policy(self, policy_path, input_data):
-        """Evaluate policy using Python logic"""
-        # Parse the policy path
-        if policy_path.endswith("/allow"):
-            package = policy_path[:-6]  # Remove /allow
-            policy_type = "allow"
-        elif policy_path.endswith("/user_management"):
-            package = policy_path[:-16]  # Remove /user_management
-            policy_type = "user_management"
-        else:
-            package = policy_path
-            policy_type = "allow"
-
-        print(f"📊 Package: {package}, Type: {policy_type}")
-
-        # LOG THE START OF POLICY EVALUATION
-        if HAS_LOGGING:
-            try:
-                # Get user info for logging
-                user_info = input_data.get("user", {})
-                trace_id = input_data.get("trace_id", "unknown")
-
-                event_logger.log_event(
-                    event_type=EventType.POLICY_EVALUATION,
-                    source_component="opa_server",
-                    action=f"Policy evaluation started",
-                    user_id=user_info.get("id"),
-                    username=user_info.get("username"),
-                    trace_id=trace_id,
+                # Log the request
+                self._log_request(
+                    EventType.OPA_REQUEST_SENT,
+                    "Policy evaluation request received",
+                    user=user_data.get("username", "unknown"),
                     details={
-                        "policy_path": policy_path,
-                        "user_role": user_info.get("role", "unknown"),
-                        "action": input_data.get("action", "unknown"),
-                        "resource_type": input_data.get("resource", {}).get(
-                            "type", "unknown"
+                        "policy_path": "zta/allow",
+                        "method": "POST",
+                        "headers": dict(self.headers),
+                        "request_id": request_id,
+                        "user_clearance": user_data.get("clearance", "BASIC"),
+                        "resource_classification": resource_data.get(
+                            "classification", "BASIC"
                         ),
                     },
-                    severity=Severity.INFO,
                 )
-            except Exception as e:
-                print(f"⚠️ Failed to log policy start: {e}")
 
-        # Extract user and resource info
-        user = input_data.get("user", {})
-        resource = input_data.get("resource", {})
-        action = input_data.get("action", "read")
+                print(f"🔍 Evaluating policy: zta/allow")
+                print(f"📥 Input: {json.dumps(data, indent=2)}")
 
-        # Get current time info
-        now = datetime.now()
+                # Get user clearance - FIXED: Handle different field names
+                user_clearance = user_data.get("clearance_level") or user_data.get(
+                    "clearance", "BASIC"
+                )
+                username = user_data.get("username", "unknown")
+                user_department = user_data.get("department", "")
 
-        # Policy evaluation logic
-        if policy_type == "allow":
-            result = self.evaluate_allow_policy(user, resource, action, now)
-        elif policy_type == "user_management":
-            result = self.evaluate_user_management_policy(user, resource, action)
-        else:
-            result = {"result": False, "reason": "Unknown policy type"}
+                # Get resource classification - FIXED: Handle different field names
+                resource_classification = resource_data.get("classification", "BASIC")
+                resource_department = resource_data.get("department", "")
 
-        # Add decision metadata
-        result["decision"] = {
-            "allowed": result.get("result", False),
-            "reason": result.get("reason", "Policy evaluation complete"),
-            "timestamp": time.time(),
-            "policy_path": policy_path,
-        }
+                print(f"📊 Package: zta, Type: allow")
+                print(f"👤 User: {username}, Clearance: {user_clearance}")
+                print(f"📄 Resource: {resource_classification}")
 
-        # LOG THE POLICY DECISION
-        if HAS_LOGGING:
-            try:
-                allowed = result.get("result", False)
-                user_info = input_data.get("user", {})
-                trace_id = input_data.get("trace_id", "unknown")
-
-                event_logger.log_event(
-                    event_type=(
-                        EventType.POLICY_ALLOW if allowed else EventType.POLICY_DENY
-                    ),
-                    source_component="opa_server",
-                    action=f"Policy decision: {'ALLOW' if allowed else 'DENY'}",
-                    user_id=user_info.get("id"),
-                    username=user_info.get("username"),
-                    trace_id=trace_id,
+                # Log evaluation start
+                self._log_request(
+                    EventType.POLICY_EVALUATION,
+                    "Policy evaluation started",
+                    user=username,
                     details={
-                        "policy_path": policy_path,
-                        "decision": result,
-                        "user_role": user_info.get("role", "unknown"),
-                        "resource": input_data.get("resource", {}),
-                        "action": input_data.get("action", "unknown"),
+                        "policy_path": "zta/allow",
+                        "user_role": user_data.get("role", "user"),
+                        "action": resource_data.get("action", "get"),
+                        "resource_type": resource_data.get("type", "unknown"),
+                        "user_clearance": user_clearance,
+                        "resource_classification": resource_classification,
                     },
-                    severity=Severity.HIGH if allowed else Severity.MEDIUM,
                 )
-            except Exception as e:
-                print(f"⚠️ Failed to log policy decision: {e}")
 
-        return result
+                # ============ SIMPLE POLICY EVALUATION (FIXED) ============
+                clearance_hierarchy = ["BASIC", "CONFIDENTIAL", "SECRET", "TOP_SECRET"]
 
-    def evaluate_allow_policy(self, user, resource, action, current_time):
-        """Evaluate allow policies"""
-        user_role = user.get("role", "user")
-        user_dept = user.get("department", "")
-        user_facility = user.get("facility", "")
-        user_clearance = user.get("clearance", "BASIC")
-
-        resource_type = resource.get("type", "document")
-        resource_dept = resource.get("department", "")
-        resource_facility = resource.get("facility", "")
-        resource_classification = resource.get("classification", "BASIC")
-        resource_owner = resource.get("owner")
-
-        clearance_levels = ["BASIC", "CONFIDENTIAL", "SECRET", "TOP_SECRET"]
-
-        # Rule 1: Superadmin can do anything
-        if user_role == "superadmin":
-            return {"result": True, "reason": "Superadmin has full access"}
-
-        # Rule 2: Admin can read documents in their facility
-        if user_role == "admin" and resource_type == "document":
-            if action == "read" and resource_facility == user_facility:
-                return {
-                    "result": True,
-                    "reason": "Admin can read documents in their facility",
-                }
-            elif (
-                action in ["write", "create"]
-                and resource_dept == user_dept
-                and resource_facility == user_facility
-            ):
-                return {
-                    "result": True,
-                    "reason": "Admin can write to documents in their department",
-                }
-
-        # Rule 3: User can read same department documents with sufficient clearance
-        if user_role == "user" and resource_type == "document" and action == "read":
-            if resource_dept == user_dept and resource_facility == user_facility:
-                # Check clearance
                 try:
-                    user_idx = clearance_levels.index(user_clearance)
-                    resource_idx = clearance_levels.index(resource_classification)
-
-                    if user_idx >= resource_idx:
-                        return {
-                            "result": True,
-                            "reason": f"User has sufficient clearance: {user_clearance} >= {resource_classification}",
-                        }
-                    else:
-                        return {
-                            "result": False,
-                            "reason": f"Insufficient clearance: {user_clearance} < {resource_classification}",
-                        }
+                    user_index = clearance_hierarchy.index(user_clearance)
                 except ValueError:
-                    pass
+                    user_index = 0  # Default to BASIC if unknown
 
-        # Rule 4: User can read their own documents
-        if user_role == "user" and resource_type == "document" and action == "read":
-            if resource_owner == user.get("id"):
-                return {"result": True, "reason": "User can read their own documents"}
+                try:
+                    resource_index = clearance_hierarchy.index(resource_classification)
+                except ValueError:
+                    resource_index = 0  # Default to BASIC if unknown
 
-        # Rule 5: Time-based restrictions
-        if user_role == "user" and resource_classification == "TOP_SECRET":
-            hour = current_time.hour
-            if hour < 9 or hour > 17:
-                return {
-                    "result": False,
-                    "reason": "TOP_SECRET access restricted to business hours (9 AM - 5 PM)",
-                }
+                # Check clearance
+                clearance_passed = user_index >= resource_index
 
-        # Default deny
-        return {"result": False, "reason": "Access denied by policy"}
+                # Check department
+                department_passed = user_department == resource_department
 
-    def evaluate_user_management_policy(self, user, resource, action):
-        """Evaluate user management policies"""
-        user_role = user.get("role", "user")
-        user_dept = user.get("department", "")
-        user_facility = user.get("facility", "")
+                # Check time restrictions for TOP_SECRET
+                time_passed = True
+                if resource_classification == "TOP_SECRET":
+                    current_hour = environment_data.get("current_hour", 12)
+                    if current_hour < 8 or current_hour >= 16:
+                        time_passed = False
 
-        resource_role = resource.get("role", "user")
-        resource_dept = resource.get("department", "")
-        resource_facility = resource.get("facility", "")
+                # Final decision
+                allowed = clearance_passed and department_passed and time_passed
 
-        # Superadmin can do anything
-        if user_role == "superadmin":
-            return {"result": True, "reason": "Superadmin can manage any user"}
-
-        # Admin can manage users in their facility
-        if user_role == "admin":
-            if action == "read" and resource_facility == user_facility:
-                return {
-                    "result": True,
-                    "reason": "Admin can view users in their facility",
-                }
-            elif (
-                action in ["create", "update"]
-                and resource_dept == user_dept
-                and resource_facility == user_facility
-            ):
-                # Prevent privilege escalation
-                role_hierarchy = {"user": 1, "admin": 2, "superadmin": 3}
-                if role_hierarchy.get(resource_role, 0) <= role_hierarchy.get(
-                    user_role, 0
-                ):
-                    return {
-                        "result": True,
-                        "reason": "Admin can manage users in their department",
-                    }
+                # Build reason
+                if not clearance_passed:
+                    reason = f"Clearance insufficient: {user_clearance} < {resource_classification}"
+                elif not department_passed:
+                    reason = f"Department mismatch: {user_department} != {resource_department}"
+                elif not time_passed:
+                    reason = (
+                        f"TOP_SECRET access restricted to business hours (8 AM - 4 PM)"
+                    )
                 else:
-                    return {
+                    reason = f"Access granted: {user_clearance} clearance, {user_department} department"
+
+                decision = {
+                    "allowed": allowed,
+                    "reason": reason,
+                    "timestamp": time.time(),
+                    "policy_path": "zta/allow",
+                    "checks": {
+                        "clearance_passed": clearance_passed,
+                        "department_passed": department_passed,
+                        "time_passed": time_passed,
+                    },
+                }
+
+                response = {
+                    "result": allowed,
+                    "reason": reason,
+                    "decision": decision,
+                }
+
+                # Log decision
+                event_type = (
+                    EventType.POLICY_ALLOW if allowed else EventType.POLICY_DENY
+                )
+                self._log_request(
+                    event_type,
+                    f"Policy decision: {'ALLOW' if allowed else 'DENY'}",
+                    user=username,
+                    details={
+                        "policy_path": "zta/allow",
+                        "decision": decision,
+                        "request_id": request_id,
+                    },
+                )
+
+                # Log response
+                self._log_request(
+                    EventType.OPA_RESPONSE_RECEIVED,
+                    f"Policy response sent: {'ALLOW' if allowed else 'DENY'}",
+                    user=username,
+                    details={
+                        "decision": decision,
+                        "policy_path": "zta/allow",
+                        "request_id": request_id,
+                    },
+                )
+
+                print(f'[Python OPA] "POST {self.path} HTTP/1.1" 200 -')
+                self._send_json_response(response)
+
+            elif self.path.startswith("/v1/data/"):
+                # Handle other policy paths
+                self._send_json_response(
+                    {
                         "result": False,
-                        "reason": "Cannot assign higher role than self",
+                        "reason": "Policy not implemented",
+                        "error": "Only zta/allow is implemented",
                     }
+                )
+            else:
+                self.send_response(404)
+                self.end_headers()
 
-        return {"result": False, "reason": "User management not allowed"}
-
-    def send_error_response(self, code, message):
-        """Send error response"""
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        response = {"error": {"code": code, "message": message}}
-        self.wfile.write(json.dumps(response).encode())
+        except Exception as e:
+            print(f"❌ OPA Server error: {e}")
+            traceback.print_exc()
+            self._log_request(
+                EventType.ERROR,
+                "OPA Server error",
+                details={"error": str(e), "traceback": traceback.format_exc()[-500:]},
+            )
+            self._send_json_response(
+                {
+                    "result": False,
+                    "reason": f"Server error: {str(e)}",
+                    "error": "Internal server error",
+                },
+                500,
+            )
 
     def log_message(self, format, *args):
-        """Custom log format"""
-        print(f"[Python OPA] {format % args}")
+        """Override to prevent default logging"""
+        pass
 
 
-# Update the start_python_opa_server function at the end of the file:
-
-
-def start_python_opa_server(port=8181):
-    """Start the Python OPA server with PROPER SSL handling"""
-    server_address = ("", port)
-    httpd = HTTPServer(server_address, PythonOPAHandler)
-
-    # Create SSL context with Python 3.13 fix
-    import ssl
-
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-
-    # FIX for Python 3.13 SSL bug
-    context.minimum_version = ssl.TLSVersion.TLSv1_2
-    context.maximum_version = ssl.TLSVersion.TLSv1_2
-
-    # Load certificates
-    context.load_cert_chain("certs/server.crt", "certs/server.key")
-
-    # Enable client verification if needed
-    context.load_verify_locations(cafile="certs/ca.crt")
-    context.verify_mode = ssl.CERT_NONE  # No client cert required for OPA Server
-
-    # Wrap socket
-    httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
-
-    print("✅ OPA Server SSL configured (TLSv1.2 forced for Python 3.13)")
-
-    # LOG SERVER STARTUP
-    if HAS_LOGGING:
-        try:
-            event_logger.log_event(
-                event_type=EventType.API_REQUEST,
-                source_component="opa_server",
-                action="OPA Server started",
-                details={"port": port, "version": "1.0.0", "ssl": "TLSv1.2"},
-                severity=Severity.INFO,
-            )
-        except Exception as e:
-            print(f"⚠️ Failed to log server startup: {e}")
-
+def run_opa_server():
+    """Run the OPA server with fixed policies"""
     print("=" * 60)
-    print("🚀 Python OPA Server for ZTA Thesis")
+    print("🚀 PYTHON OPA SERVER - FIXED VERSION")
     print("=" * 60)
-    print(f"📡 Port: {port}")
-    print(f"🔗 URL: https://localhost:{port}")
-    print(f"🏥 Health: https://localhost:{port}/health")
-    print(f"📋 Policies: https://localhost:{port}/v1/policies")
-    print(f"⚖️  Evaluate: POST https://localhost:{port}/v1/data/zta/allow")
-    print(f"💾 Policy file: app/policy/policies.rego")
+    print("📡 Port: 8181")
+    print("🔗 URL: https://localhost:8181")
+    print("🏥 Health: https://localhost:8181/health")
+    print("📋 Policies: https://localhost:8181/v1/policies")
+    print("⚖️  Evaluate: POST https://localhost:8181/v1/data/zta/allow")
+    print("💾 Policy logic: Built-in simple ZTA policies")
     print("=" * 60)
-    print("📝 Policies will be loaded from app/policy/policies.rego")
-    print("📝 If file doesn't exist, default policies will be created")
+    print("📝 Policies implemented:")
+    print("  • Clearance hierarchy: BASIC → CONFIDENTIAL → SECRET → TOP_SECRET")
+    print("  • Department matching required")
+    print("  • TOP_SECRET: Business hours only (8 AM - 4 PM)")
     print("=" * 60)
-    print(f"📊 Event logging: {'ENABLED' if HAS_LOGGING else 'DISABLED'}")
-    print(f"🔐 SSL: TLSv1.2 (Python 3.13 compatibility)")
-    print("\nPress Ctrl+C to stop the server\n")
+    print("📊 Event logging: ENABLED")
+    print("🔐 SSL: TLSv1.2 (Python 3.13 compatibility)")
+    print("\nPress Ctrl+C to stop the server")
+
+    # Create SSL context
+    ssl_context = create_server_ssl_context(verify_client=False, require_mtls=False)
+
+    # Create server
+    server_address = ("0.0.0.0", 8181)
+    httpd = HTTPServer(server_address, OPARequestHandler)
+    httpd.socket = ssl_context.wrap_socket(httpd.socket, server_side=True)
+
+    print(f"\n📋 Loaded policy: zta")
+    print("✅ Server ready to evaluate policies")
 
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        # LOG SERVER SHUTDOWN
-        if HAS_LOGGING:
-            try:
-                event_logger.log_event(
-                    event_type=EventType.API_REQUEST,
-                    source_component="opa_server",
-                    action="OPA Server stopped",
-                    severity=Severity.INFO,
-                )
-            except Exception as e:
-                print(f"⚠️ Failed to log server shutdown: {e}")
-
-        print("\n🛑 Stopping Python OPA Server...")
+        print("\n🛑 Server stopped by user")
+    except Exception as e:
+        print(f"\n❌ Server error: {e}")
+    finally:
         httpd.server_close()
 
 
 if __name__ == "__main__":
-    # Check if port is provided as argument
-    port = 8181
-    if len(sys.argv) > 1:
-        try:
-            port = int(sys.argv[1])
-        except ValueError:
-            print(f"⚠️  Invalid port: {sys.argv[1]}. Using default port 8181")
-
-    start_python_opa_server(port)
+    run_opa_server()

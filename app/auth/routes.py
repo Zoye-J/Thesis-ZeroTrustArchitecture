@@ -214,10 +214,56 @@ def handle_login_api_mode(username, password, request_id):
         )
         return jsonify({"error": "Invalid credentials"}), 401
 
+    # ============ CRITICAL FIX: GENERATE RSA KEYS FOR USER ============
+    try:
+        # Check if user has keys
+        if not user.keys:
+            # Generate RSA keys for user
+            user.generate_keys()
+            print(f"✅ Generated RSA keys for user: {username}")
+            event_logger.log_event(
+                event_type=EventType.RSA_KEY_GENERATED,
+                source_component="auth_server",
+                action="Generated RSA keys for user",
+                user_id=user.id,
+                username=user.username,
+                details={
+                    "reason": "First login or missing keys",
+                    "key_algorithm": "RSA-OAEP-SHA256",
+                    "key_size": 2048,
+                },
+                trace_id=request_id,
+                severity=Severity.INFO,
+            )
+        else:
+            print(f"✓ User {username} already has RSA keys")
+    except Exception as key_error:
+        print(f"⚠️ Failed to generate keys for {username}: {key_error}")
+        # Don't fail login - just log the error
+        event_logger.log_event(
+            event_type=EventType.SECURITY_ALERT,
+            source_component="auth_server",
+            action="Failed to generate RSA keys",
+            user_id=user.id,
+            username=user.username,
+            details={
+                "error": str(key_error),
+                "note": "User can login but encryption may fail",
+            },
+            trace_id=request_id,
+            severity=Severity.LOW,
+        )
+    # ============ END OF FIX ============
+
     # Create JWT tokens
     access_token, refresh_token, additional_claims = create_jwt_tokens(
         user.to_dict(), user.id
     )
+
+    # Include public key in response for client-side encryption
+    user_public_key = None
+    if user.keys:
+        user_public_key = user.keys.get_public_key_pem()
 
     # Log successful login
     event_logger.log_event(
@@ -230,10 +276,13 @@ def handle_login_api_mode(username, password, request_id):
             "token_claims": additional_claims,
             "auth_method": "password",
             "token_expires": (datetime.utcnow() + timedelta(hours=8)).isoformat(),
+            "has_rsa_keys": bool(user.keys),
+            "public_key_length": len(user_public_key) if user_public_key else 0,
         },
         trace_id=request_id,
         severity=Severity.INFO,
     )
+
     log_request(
         action="Login attempt",
         user_id=user.id,
@@ -243,6 +292,7 @@ def handle_login_api_mode(username, password, request_id):
             "status": "Allowed",
             "reason": "Authentication successful",
             "request_id": request_id,
+            "keys_generated": bool(user.keys),
         },
         trace_id=request_id,
     )
@@ -254,6 +304,13 @@ def handle_login_api_mode(username, password, request_id):
                 "access_token": access_token,
                 "refresh_token": refresh_token,
                 "user": user.to_dict(),
+                # Include public key if available
+                "public_key": user_public_key if user_public_key else None,
+                "encryption_info": {
+                    "algorithm": "RSA-OAEP-SHA256",
+                    "key_size": 2048,
+                    "has_keys": bool(user.keys),
+                },
             }
         ),
         200,
@@ -272,6 +329,39 @@ def handle_login_gateway_mode(username, password, request_id):
             headers={"Content-Type": "application/json", "X-Request-ID": request_id},
             timeout=5,
         )
+
+        # If login successful, store public key in session
+        if response.status_code == 200:
+            data = response.json()
+            user_data = data.get("user", {})
+
+            # Store user info in session
+            from flask import session
+
+            session["user_id"] = user_data.get("id")
+            session["username"] = user_data.get("username")
+            session["public_key"] = data.get("public_key")
+            session["has_rsa_keys"] = data.get("encryption_info", {}).get(
+                "has_keys", False
+            )
+
+            print(
+                f"✅ User {username} logged in - RSA keys: {session.get('has_rsa_keys')}"
+            )
+
+            # Log the successful gateway login
+            event_logger.log_event(
+                event_type=EventType.USER_LOGIN,
+                source_component="gateway",
+                action="Gateway login completed",
+                username=username,
+                details={
+                    "api_server_response": "success",
+                    "has_rsa_keys": session.get("has_rsa_keys"),
+                },
+                trace_id=request_id,
+                severity=Severity.INFO,
+            )
 
         # Return the API Server's response directly
         return jsonify(response.json()), response.status_code

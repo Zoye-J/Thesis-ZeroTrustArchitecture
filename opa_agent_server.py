@@ -1,5 +1,5 @@
 """
-OPA Agent Server with Encryption
+OPA Agent Server with Encryption - FIXED VERSION
 Runs on Port 8282
 Uses centralized SSL config
 """
@@ -7,18 +7,20 @@ Uses centralized SSL config
 from flask import Flask, request, jsonify, g
 from app.opa_agent.agent import OpaAgent
 import uuid
+import os
 import logging
 import ssl
 from app.logs.zta_event_logger import event_logger, EventType, Severity
-import json  # Add this import
+import json
 
 # Import centralized SSL config
 try:
-    from app.ssl_config import create_ssl_context
+    from app.ssl_config import create_opa_agent_ssl_context
 
     HAS_SSL_CONFIG = True
 except ImportError:
     HAS_SSL_CONFIG = False
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -26,16 +28,16 @@ logger = logging.getLogger(__name__)
 
 def create_opa_agent_app():
     """Create OPA Agent Flask application"""
-    app = Flask(__name__)
+    flask_app = Flask(__name__)  # Changed variable name from app to flask_app
     agent = OpaAgent()
 
-    @app.before_request
+    @flask_app.before_request
     def setup_request():
         """Setup request context"""
         g.request_id = str(uuid.uuid4())
         g.agent = agent
 
-    @app.route("/health", methods=["GET"])
+    @flask_app.route("/health", methods=["GET"])
     def health():
         """Health check endpoint"""
         return (
@@ -51,7 +53,7 @@ def create_opa_agent_app():
             200,
         )
 
-    @app.route("/evaluate", methods=["POST"])
+    @flask_app.route("/evaluate", methods=["POST"])
     def evaluate():
         """
         Main endpoint: Receive encrypted request, process, return encrypted response
@@ -333,7 +335,7 @@ def create_opa_agent_app():
 
             return jsonify({"error": "Processing failed", "message": str(e)}), 500
 
-    @app.route("/public-key", methods=["GET"])
+    @flask_app.route("/public-key", methods=["GET"])
     def get_public_key():
         """Get OPA Agent's public key"""
         # Log public key request
@@ -360,43 +362,53 @@ def create_opa_agent_app():
             200,
         )
 
-    return app
+    return flask_app  # Return flask_app instead of app
 
 
 if __name__ == "__main__":
-    # Use centralized SSL config if available
-    if HAS_SSL_CONFIG:
-        context = create_ssl_context(verify_client=False)
-    else:
-        # Fallback to old method
-        import ssl
-
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        context.minimum_version = ssl.TLSVersion.TLSv1_2  # Fix for Python 3.13
-        context.maximum_version = ssl.TLSVersion.TLSv1_2
-        context.load_cert_chain("certs/server.crt", "certs/server.key")
-
-    app = create_opa_agent_app()
-
-    # Log server startup
-    event_logger.log_event(
-        event_type=EventType.REQUEST_RECEIVED,
-        source_component="opa_agent",
-        action="OPA Agent Server started",
-        details={"port": 8282, "encryption": "RSA-2048", "ssl": True},
-        severity=Severity.INFO,
-    )
-
     print("=" * 60)
     print("🔐 OPA AGENT SERVER WITH ENCRYPTION")
     print("=" * 60)
-    print("📡 Port: 8282")
-    print("🔗 URL: https://localhost:8282")
-    print("🏥 Health: https://localhost:8282/health")
-    print("🔑 Public Key: https://localhost:8282/public-key")
-    print("⚖️  Evaluate: POST https://localhost:8282/evaluate")
-    print("📊 Real-time Events: YES (via Gateway Dashboard)")
+    print(f"📡 Port: 8282")
+    print(f"🔗 URL: https://localhost:8282")
+    print(f"🏥 Health: https://localhost:8282/health")
+    print(f"🔑 Public Key: https://localhost:8282/public-key")
+    print(f"⚖️  Evaluate: POST https://localhost:8282/evaluate")
+    print(f"📊 Real-time Events: YES (via Gateway Dashboard)")
     print("=" * 60)
-    print("Press Ctrl+C to stop\n")
+    print("Press Ctrl+C to stop")
 
-    app.run(host="0.0.0.0", port=8282, ssl_context=context, debug=True)
+    # Create the Flask app
+    app = create_opa_agent_app()  # Now app is the Flask application instance
+
+    # Use OPA Agent specific SSL context
+    try:
+        from app.ssl_config import create_opa_agent_ssl_context
+
+        ssl_context = create_opa_agent_ssl_context()
+        print("✅ Using OPA Agent dedicated SSL certificate")
+    except ImportError:
+        print("⚠️ OPA Agent SSL function not found, using server SSL")
+        from app.ssl_config import create_server_ssl_context
+
+        ssl_context = create_server_ssl_context(verify_client=False, require_mtls=False)
+    except Exception as e:
+        print(f"⚠️ SSL error: {e}, falling back to default")
+        import ssl
+
+        ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
+        ssl_context.maximum_version = ssl.TLSVersion.TLSv1_2
+        ssl_context.load_cert_chain(
+            "certs/opa_agent/opa_agent.crt", "certs/opa_agent/opa_agent.key"
+        )
+        ssl_context.load_verify_locations("certs/ca.crt")
+        ssl_context.verify_mode = ssl.CERT_NONE
+
+    app.run(
+        host="0.0.0.0",
+        port=8282,
+        ssl_context=ssl_context,
+        debug=True,
+        extra_files=["app/opa_agent/agent.py", "app/ssl_config.py"],
+    )

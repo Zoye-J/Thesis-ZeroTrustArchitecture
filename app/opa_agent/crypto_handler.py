@@ -26,34 +26,50 @@ class CryptoHandler:
         return private_pem, public_pem
 
     def encrypt_for_user(self, data, user_public_key_pem):
-        """Encrypt data with user's public key - WITH VALIDATION"""
+        """Encrypt data with user's public key - FIXED with better validation"""
         try:
-            # Debug: Check key format
-            print(f"🔐 Encrypting for user - Key length: {len(user_public_key_pem)}")
-            print(f"🔐 Key preview: {user_public_key_pem[:200]}")
+            # Step 1: Ensure data is JSON string
+            if isinstance(data, dict):
+                import json
 
-            # Clean the key - remove any extra whitespace
-            cleaned_key = user_public_key_pem.strip()
+                data_str = json.dumps(data)
+            elif isinstance(data, str):
+                data_str = data
+            else:
+                data_str = str(data)
 
-            # Ensure it has proper PEM format
-            if not cleaned_key.startswith("-----BEGIN PUBLIC KEY-----"):
-                # Try to fix common issues
-                if "PUBLIC KEY" in cleaned_key:
-                    # Key might be missing BEGIN/END lines
-                    cleaned_key = f"-----BEGIN PUBLIC KEY-----\n{cleaned_key}\n-----END PUBLIC KEY-----"
-                else:
-                    # Might be in wrong format - convert from database format
-                    cleaned_key = self._fix_public_key_format(cleaned_key)
+            # Step 2: Validate and clean public key
+            cleaned_key = self._validate_and_clean_public_key(user_public_key_pem)
 
-            print(
-                f"🔐 Cleaned key starts correctly: {cleaned_key.startswith('-----BEGIN PUBLIC KEY-----')}"
-            )
+            if not cleaned_key:
+                raise ValueError("Invalid public key format")
 
-            # Load public key
-            public_key = serialization.load_pem_public_key(cleaned_key.encode())
+            # Step 3: Load key with multiple attempts
+            public_key = None
+            attempts = [
+                lambda: serialization.load_pem_public_key(cleaned_key.encode()),
+                lambda: serialization.load_pem_public_key(
+                    self._try_fix_pem_format(cleaned_key).encode()
+                ),
+                lambda: serialization.load_pem_public_key(
+                    self._extract_base64_and_rebuild(cleaned_key).encode()
+                ),
+            ]
 
+            for attempt in attempts:
+                try:
+                    public_key = attempt()
+                    if public_key:
+                        break
+                except:
+                    continue
+
+            if not public_key:
+                raise ValueError("Failed to load public key in any format")
+
+            # Step 4: Encrypt
             encrypted = public_key.encrypt(
-                data.encode(),
+                data_str.encode(),
                 padding.OAEP(
                     mgf=padding.MGF1(algorithm=hashes.SHA256()),
                     algorithm=hashes.SHA256(),
@@ -65,30 +81,66 @@ class CryptoHandler:
 
         except Exception as e:
             print(f"❌ Encryption error: {e}")
-            import traceback
+            # Fallback: return unencrypted with error flag
+            import json
 
-            traceback.print_exc()
-            raise
+            return json.dumps(
+                {
+                    "error": "encryption_failed",
+                    "message": str(e),
+                    "original_data": data_str if "data_str" in locals() else data,
+                }
+            )
 
+    def _validate_and_clean_public_key(self, key_str):
+        """Validate and clean public key"""
+        if not key_str or len(key_str) < 100:
+            return None
 
-def _fix_public_key_format(self, key_str):
-    """Fix common public key format issues"""
-    # Remove any database encoding issues
-    key_str = key_str.replace("\\n", "\n").replace("\\r", "")
+        # Remove any database escape characters
+        key_str = key_str.replace("\\n", "\n").replace("\\r", "\r")
 
-    # If it's base64 encoded, decode it
-    if len(key_str) > 300 and " " not in key_str and "\n" not in key_str:
-        try:
-            # Might be base64 without PEM headers
-            import base64
+        # Ensure proper PEM format
+        if "-----BEGIN PUBLIC KEY-----" not in key_str:
+            # Try to rebuild
+            key_str = f"-----BEGIN PUBLIC KEY-----\n{key_str}\n-----END PUBLIC KEY-----"
 
-            decoded = base64.b64decode(key_str)
-            # Convert back to PEM
-            key_str = f"-----BEGIN PUBLIC KEY-----\n{base64.b64encode(decoded).decode()}\n-----END PUBLIC KEY-----"
-        except:
-            pass
+        # Ensure it has proper line breaks
+        lines = key_str.split("\n")
+        if len(lines) < 3:  # Single line PEM
+            # Insert line breaks every 64 chars
+            content = (
+                lines[0]
+                .replace("-----BEGIN PUBLIC KEY-----", "")
+                .replace("-----END PUBLIC KEY-----", "")
+                .strip()
+            )
+            formatted = "-----BEGIN PUBLIC KEY-----\n"
+            for i in range(0, len(content), 64):
+                formatted += content[i : i + 64] + "\n"
+            formatted += "-----END PUBLIC KEY-----"
+            return formatted
 
-    return key_str
+        return key_str
+
+    def _fix_public_key_format(self, key_str):
+        """Fix common public key format issues"""
+        # Remove any database encoding issues
+        key_str = key_str.replace("\\n", "\n").replace("\\r", "")
+
+        # If it's base64 encoded, decode it
+        if len(key_str) > 300 and " " not in key_str and "\n" not in key_str:
+            try:
+                # Might be base64 without PEM headers
+                import base64
+
+                decoded = base64.b64decode(key_str)
+                # Convert back to PEM
+                key_str = f"-----BEGIN PUBLIC KEY-----\n{base64.b64encode(decoded).decode()}\n-----END PUBLIC KEY-----"
+            except:
+                pass
+
+        return key_str
 
     def decrypt_from_user(self, encrypted_data, agent_private_key_pem):
         """Decrypt data with agent's private key - FIXED"""

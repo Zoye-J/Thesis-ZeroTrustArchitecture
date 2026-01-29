@@ -4,6 +4,7 @@ import requests
 from flask import current_app
 import logging
 from app.opa_agent.crypto_handler import CryptoHandler
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -11,14 +12,24 @@ logger = logging.getLogger(__name__)
 class OpaAgent:
     def __init__(self):
         self.crypto = CryptoHandler()
-        # Try to load existing keys, generate if not exist
+
+        # Generate/load keys FIRST
         self.agent_private_key, self.agent_public_key = self._load_or_generate_keys()
+
+        # Verify keys exist
+        if not self.agent_private_key or not self.agent_public_key:
+            raise ValueError("Failed to initialize OPA Agent RSA keys")
+
+        # Log key info
+        logger.info(f"OPA Agent initialized with keys")
+        logger.info(f"Private key length: {len(self.agent_private_key)}")
+        logger.info(f"Public key length: {len(self.agent_public_key)}")
+
         self.opa_url = "https://localhost:8181"
         self.api_server_url = "https://localhost:5001"
-        logger.info("OPA Agent initialized")
 
     def _load_or_generate_keys(self):
-        """Load existing keys or generate new ones"""
+        """Load existing keys or generate new ones AND SAVE THEM"""
         import os
         from app.mTLS.cert_manager import cert_manager
 
@@ -27,20 +38,47 @@ class OpaAgent:
         private_key_path = os.path.join(opa_agent_dir, "private.pem")
         public_key_path = os.path.join(opa_agent_dir, "public.pem")
 
+        # Ensure directory exists
+        os.makedirs(opa_agent_dir, exist_ok=True)
+
         if os.path.exists(private_key_path) and os.path.exists(public_key_path):
             try:
                 with open(private_key_path, "r") as f:
                     private_key = f.read()
                 with open(public_key_path, "r") as f:
                     public_key = f.read()
-                logger.info("Loaded existing OPA Agent keys")
-                return private_key, public_key
+
+                # Validate the keys are actually valid PEM
+                if "-----BEGIN" in private_key and "-----BEGIN" in public_key:
+                    logger.info("Loaded existing OPA Agent keys from disk")
+                    return private_key, public_key
+                else:
+                    logger.warning("Existing keys are invalid, regenerating...")
             except Exception as e:
                 logger.warning(f"Failed to load existing keys: {e}")
 
         # Generate new keys
         logger.info("Generating new OPA Agent keys")
-        return self.crypto.generate_key_pair()
+        private_key, public_key = self.crypto.generate_key_pair()
+
+        # Convert bytes to string if needed
+        if isinstance(private_key, bytes):
+            private_key = private_key.decode("utf-8")
+        if isinstance(public_key, bytes):
+            public_key = public_key.decode("utf-8")
+
+        # Save keys to disk
+        try:
+            with open(private_key_path, "w") as f:
+                f.write(private_key)
+            with open(public_key_path, "w") as f:
+                f.write(public_key)
+            logger.info(f"✅ Saved OPA Agent keys to {opa_agent_dir}/")
+        except Exception as e:
+            logger.error(f"Failed to save OPA Agent keys: {e}")
+            # Continue anyway - keys are still in memory
+
+        return private_key, public_key
 
     def decrypt_request(self, encrypted_data):
         """Decrypt incoming request from Gateway"""
@@ -233,32 +271,69 @@ class OpaAgent:
             }
 
     def _prepare_opa_input(self, request_data):
-        """Prepare input data for OPA Server"""
-        user = request_data.get("user", {})
-        resource_type = self._extract_resource_type(request_data.get("endpoint", ""))
+        """Prepare input data for OPA Server - HANDLES MINIMAL DATA"""
+
+        # Handle both full and minimal data formats
+        if "u" in request_data:  # Minimal format
+            user_data = request_data.get("u", {})
+            resource_data = request_data.get("r", {})
+            env_data = request_data.get("e", {})
+
+            # Expand minimal format
+            user = {
+                "id": 0,
+                "username": "user",
+                "role": "user",
+                "department": user_data.get("d", ""),
+                "facility": "",
+                "clearance": user_data.get("c", "BASIC"),
+                "email": "",
+            }
+            resource = {
+                "type": "document",
+                "id": resource_data.get("id"),
+                "classification": resource_data.get("c", "BASIC"),
+                "department": resource_data.get("d", ""),
+                "facility": "",
+                "category": "",
+            }
+            environment = {
+                "timestamp": datetime.now().isoformat(),
+                "current_hour": env_data.get("h", 12),
+                "client_ip": "127.0.0.1",
+            }
+            request_id = request_data.get("id", "unknown")
+
+        else:  # Full format
+            user = request_data.get("user", {})
+            resource = request_data.get("resource", {})
+            environment = request_data.get("environment", {})
+            request_id = request_data.get("request_id", "unknown")
 
         return {
             "user": {
-                "id": user.get("sub") or user.get("id"),
-                "username": user.get("username"),
-                "role": user.get("user_class") or user.get("role", "user"),
+                "id": user.get("id") or 0,
+                "username": user.get("username") or "user",
+                "role": user.get("role") or "user",
                 "department": user.get("department", ""),
                 "facility": user.get("facility", ""),
-                "clearance": user.get("clearance_level")
-                or user.get("clearance", "BASIC"),
+                "clearance": user.get("clearance", "BASIC"),
                 "email": user.get("email", ""),
             },
             "resource": {
-                "type": resource_type,
-                "path": request_data.get("endpoint", ""),
-                "method": request_data.get("method", "GET"),
+                "type": resource.get("type", "document"),
+                "id": resource.get("id"),
+                "classification": resource.get("classification", "BASIC"),
+                "department": resource.get("department", ""),
+                "facility": resource.get("facility", ""),
+                "category": resource.get("category", ""),
             },
-            "action": request_data.get("method", "GET").lower(),
             "environment": {
-                "time": request_data.get("timestamp"),
-                "source": "opa_agent",
+                "timestamp": environment.get("timestamp", datetime.now().isoformat()),
+                "current_hour": environment.get("current_hour", datetime.now().hour),
+                "client_ip": environment.get("client_ip", "127.0.0.1"),
             },
-            "request_id": request_data.get("request_id", "unknown"),
+            "request_id": request_id,
         }
 
     def _extract_resource_type(self, endpoint):

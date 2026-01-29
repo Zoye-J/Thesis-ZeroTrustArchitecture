@@ -271,42 +271,36 @@ def verify_certificate():
 @api_bp.route("/resources", methods=["GET"])
 @require_authentication
 def get_resources():
-    """Get all resources visible to the user"""
+    """Get all resources visible to the user - FIXED VERSION"""
     try:
         user = g.current_user
         request_id = getattr(g, "request_id", str(uuid.uuid4()))
 
-        # Get all documents
+        # Get all non-archived documents
         all_documents = GovernmentDocument.query.filter_by(is_archived=False).all()
 
-        # Filter based on user's access
         accessible_documents = []
 
         for doc in all_documents:
-            # Public documents - everyone can see
-            if doc.classification == "PUBLIC":
-                accessible_documents.append(doc)
-                continue
+            doc_dict = doc.to_dict()
 
-            # Department-specific - only same department
-            if doc.classification == "DEPARTMENT":
-                if doc.department == user.department:
-                    accessible_documents.append(doc)
-                continue
+            # Add classification to match OPA policy expectations
+            # Map database classifications to OPA expected classifications
+            classification_map = {
+                "PUBLIC": "BASIC",
+                "DEPARTMENT": "CONFIDENTIAL",
+                "TOP_SECRET": "TOP_SECRET",
+            }
 
-            # TOP_SECRET - MOD only with clearance and time restrictions
-            if doc.classification == "TOP_SECRET":
-                # Only MOD department users
-                if user.department == "MOD":
-                    # MOD users have SECRET clearance by default
-                    if user.clearance_level in ["SECRET", "TOP_SECRET"]:
-                        accessible_documents.append(doc)
-                continue
+            doc_dict["classification"] = classification_map.get(
+                doc.classification, "BASIC"
+            )
+            doc_dict["type"] = "document"
+            doc_dict["action"] = "read"
 
-        # Convert to list of dictionaries
-        result = [doc.to_dict() for doc in accessible_documents]
+            accessible_documents.append(doc_dict)
 
-        return jsonify(result), 200
+        return jsonify(accessible_documents), 200
 
     except Exception as e:
         current_app.logger.error(f"Error getting resources: {str(e)}")

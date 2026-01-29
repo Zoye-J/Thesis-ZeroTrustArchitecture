@@ -28,12 +28,17 @@ class User(db.Model):
     mfa_enabled = db.Column(db.Boolean, default=False)
     last_certificate_auth = db.Column(db.DateTime, nullable=True)
 
-    # RSA Key fields
-    public_key = db.Column(db.Text, nullable=True)  # PEM format
+    # ⚠️ DEPRECATED: Old RSA Key fields - Keep for backward compatibility
+    public_key = db.Column(db.Text, nullable=True)  # PEM format (DEPRECATED)
     public_key_fingerprint = db.Column(db.String(64), unique=True, nullable=True)
     private_key_path = db.Column(
         db.String(500), nullable=True
-    )  # Path to encrypted private key
+    )  # Path to encrypted private key (DEPRECATED)
+
+    # Add relationship to UserKey model
+    keys = db.relationship(
+        "UserKey", backref="user", uselist=False, cascade="all, delete-orphan"
+    )
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -65,6 +70,36 @@ class User(db.Model):
                 else None
             ),
         }
+
+    @property
+    def public_key_pem(self):
+        """Get user's public key from UserKey model - NEW WAY"""
+        if self.keys:
+            return self.keys.get_public_key_pem()
+
+        # Fallback to deprecated field for backward compatibility
+        if self.public_key:
+            return self.public_key
+
+        return None
+
+    def generate_keys(self):
+        """Generate RSA keys for user using UserKey model"""
+        if self.keys:
+            return self.keys.get_public_key_pem()
+
+        # Generate new keys
+        from app.models.keys import UserKey
+
+        user_key = UserKey.generate_for_user(self.id)
+        db.session.add(user_key)
+        db.session.commit()
+
+        return user_key.get_public_key_pem()
+
+    def has_keys(self):
+        """Check if user has RSA keys"""
+        return bool(self.keys) or bool(self.public_key)
 
     @classmethod
     def find_by_certificate_fingerprint(cls, fingerprint):
@@ -101,6 +136,40 @@ class User(db.Model):
         self.certificate_expires = None
         self.certificate_subject = None
         self.certificate_issuer = None
+
+    def migrate_keys(self):
+        """Migrate old keys to new UserKey model"""
+        if self.public_key and not self.keys:
+            try:
+                from app.models.keys import UserKey
+
+                # Create UserKey from old public_key
+                user_key = UserKey(
+                    user_id=self.id,
+                    public_key_pem=self.public_key,
+                    private_key_pem="",  # We don't have the private key in old system
+                    key_size=2048,
+                    algorithm="RSA-OAEP-SHA256",
+                )
+
+                db.session.add(user_key)
+                db.session.commit()
+
+                # Clear old fields
+                self.public_key = None
+                self.public_key_fingerprint = None
+                self.private_key_path = None
+
+                db.session.commit()
+
+                print(f"✅ Migrated keys for user: {self.username}")
+                return True
+
+            except Exception as e:
+                db.session.rollback()
+                print(f"❌ Migration failed for {self.username}: {e}")
+                return False
+        return False
 
 
 class GovernmentDocument(db.Model):

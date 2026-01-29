@@ -9,6 +9,52 @@ default allow := false
 # ZERO TRUST AUTHENTICATION POLICIES
 #############################################
 
+
+# Clearance hierarchy
+clearance_hierarchy := ["BASIC", "CONFIDENTIAL", "SECRET", "TOP_SECRET"]
+
+# Get clearance index
+clearance_index(level) := idx {
+    some idx
+    clearance_hierarchy[idx] == level
+}
+
+# Simple clearance check
+clearance_allowed {
+    user_idx := clearance_index(input.user.clearance)
+    resource_idx := clearance_index(input.resource.classification)
+    user_idx >= resource_idx
+}
+
+# Department check
+department_allowed {
+    input.user.department == input.resource.department
+}
+
+# Time check for TOP_SECRET
+time_allowed {
+    input.resource.classification != "TOP_SECRET"
+} else {
+    input.resource.classification == "TOP_SECRET"
+    hour := time.clock_hour(input.environment.timestamp)
+    hour >= 8
+    hour <= 16
+}
+
+# Main allow rule - SIMPLE VERSION FOR TESTING
+allow {
+    # 1. Clearance check
+    clearance_allowed
+    
+    # 2. Department check  
+    department_allowed
+    
+    # 3. Time check
+    time_allowed
+    
+    reason := sprintf("Access granted: %s clearance, %s department, time OK", 
+        [input.user.clearance, input.user.department])
+}
 # Validate authentication method strength
 auth_strength := strength {
     # Tier 1: mTLS + JWT (Strongest)

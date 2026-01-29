@@ -7,6 +7,7 @@ BANGLADESH GOVERNMENT VERSION
 import os
 import subprocess
 import json
+import logging
 import hashlib
 from datetime import datetime, timedelta
 from cryptography import x509
@@ -24,6 +25,7 @@ class CertificateManager:
         self.ca_cert_path = os.path.join(cert_dir, "ca.crt")
         self.ca_key_path = os.path.join(cert_dir, "ca.key")
         self.keys_dir = os.path.join(cert_dir, "user_keys")
+        self.logger = logging.getLogger(__name__)
 
         # Bangladesh Government Structure
         self.bangladesh_departments = {
@@ -307,58 +309,6 @@ subjectAltName = email:{email}
         except Exception as e:
             return False, f"Certificate validation error: {str(e)}"
 
-    def validate_certificate(self, cert_pem):
-        """Validate a client certificate"""
-        try:
-            # Parse certificate
-            cert = x509.load_pem_x509_certificate(cert_pem.encode(), default_backend())
-
-            # Check if CA exists
-            if not os.path.exists(self.ca_cert_path):
-                return False, "CA certificate not found"
-
-            # Load CA certificate
-            with open(self.ca_cert_path, "rb") as f:
-                ca_cert = x509.load_pem_x509_certificate(f.read(), default_backend())
-
-            # Basic validation
-            now = datetime.utcnow()
-
-            if now < cert.not_valid_before:
-                return False, "Certificate not yet valid"
-
-            if now > cert.not_valid_after:
-                return False, "Certificate expired"
-
-            # Check issuer (simplified - in production, verify chain properly)
-            if cert.issuer != ca_cert.subject:
-                return False, "Certificate not issued by trusted CA"
-
-            # Extract info
-            fingerprint = cert.fingerprint(hashes.SHA256()).hex()
-            serial = format(cert.serial_number, "X")
-
-            # Extract subject info
-            subject = {}
-            for attr in cert.subject:
-                subject[attr.oid._name] = attr.value
-
-            issuer = {}
-            for attr in cert.issuer:
-                issuer[attr.oid._name] = attr.value
-
-            cert_info = {
-                "fingerprint": fingerprint,
-                "serial_number": serial,
-                "subject": subject,
-                "issuer": issuer,
-                "not_valid_before": cert.not_valid_before.isoformat(),
-                "not_valid_after": cert.not_valid_after.isoformat(),
-                "raw_certificate": base64.b64encode(cert_pem.encode()).decode(),
-            }
-
-            return True, cert_info
-
         except Exception as e:
             return False, f"Certificate validation error: {str(e)}"
 
@@ -456,14 +406,25 @@ subjectAltName = email:{email}
         }
 
     def get_user_public_key(self, user_id):
-        """Get user's public key from storage"""
-        user_key_dir = os.path.join(self.keys_dir, str(user_id))
-        public_key_path = os.path.join(user_key_dir, "public.pem")
+        """Get user's public key from database"""
+        try:
+            from app.models.user import User
+            from app.models import db
 
-        if os.path.exists(public_key_path):
-            with open(public_key_path, "r") as f:
-                return f.read()
-        return None
+            user = db.session.query(User).get(user_id)
+            if user and user.keys:
+                return user.keys.get_public_key_pem()
+
+            # If no keys exist, generate them
+            if user:
+                return user.generate_keys()
+
+            return None
+        except Exception as e:
+            self.logger.error(
+                f"Failed to get user public key: {e}"
+            )  # ← Use self.logger
+            return None
 
     def generate_opa_agent_keys(self):
         """Generate RSA keys for OPA Agent (simplified)"""

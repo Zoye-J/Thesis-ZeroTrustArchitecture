@@ -164,6 +164,39 @@ def get_ssl_context_for_service(service_name):
         raise ValueError(f"Unknown service: {service_name}")
 
 
+def create_opa_agent_ssl_context():
+    """
+    Create SSL context for OPA Agent with dedicated certificate
+    """
+    verify_certificates()
+
+    # Use OPA Agent specific certificate if exists
+    opa_agent_cert = CERTS_DIR / "opa_agent" / "opa_agent.crt"
+    opa_agent_key = CERTS_DIR / "opa_agent" / "opa_agent.key"
+
+    if opa_agent_cert.exists() and opa_agent_key.exists():
+        cert_file = str(opa_agent_cert)
+        key_file = str(opa_agent_key)
+        print("✅ Using OPA Agent dedicated certificate")
+    else:
+        cert_file = str(SERVER_CERT)
+        key_file = str(SERVER_KEY)
+        print("⚠️ Using shared server certificate for OPA Agent")
+
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.maximum_version = ssl.TLSVersion.TLSv1_2
+
+    context.load_cert_chain(certfile=cert_file, keyfile=key_file)
+    context.load_verify_locations(cafile=str(CA_CERT))
+
+    # OPA Agent doesn't require client certificates
+    context.verify_mode = ssl.CERT_NONE
+    context.check_hostname = False
+
+    return context
+
+
 # Helper for requests library
 def get_requests_ssl_context():
     """
