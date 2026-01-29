@@ -2,11 +2,20 @@
 import requests
 import json
 import uuid
+import sys
 import os
 from flask import current_app, request
 from datetime import datetime
 import logging
 from app.logs.zta_event_logger import event_logger, EventType  # CHANGED HERE
+
+# Apply SSL fix BEFORE any imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+try:
+    from app.ssl_fix import create_fixed_ssl_context
+except ImportError:
+    print("⚠️ SSL fix module not available for OPA client")
+
 
 logger = logging.getLogger(__name__)
 

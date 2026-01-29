@@ -546,14 +546,34 @@ user_management := {"allow": true, "reason": "Admin can manage users in their fa
         print(f"[Python OPA] {format % args}")
 
 
+# Update the start_python_opa_server function at the end of the file:
+
+
 def start_python_opa_server(port=8181):
-    """Start the Python OPA server"""
+    """Start the Python OPA server with PROPER SSL handling"""
     server_address = ("", port)
     httpd = HTTPServer(server_address, PythonOPAHandler)
 
+    # Create SSL context with Python 3.13 fix
+    import ssl
+
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+
+    # FIX for Python 3.13 SSL bug
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.maximum_version = ssl.TLSVersion.TLSv1_2
+
+    # Load certificates
     context.load_cert_chain("certs/server.crt", "certs/server.key")
+
+    # Enable client verification if needed
+    context.load_verify_locations(cafile="certs/ca.crt")
+    context.verify_mode = ssl.CERT_NONE  # No client cert required for OPA Server
+
+    # Wrap socket
     httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
+
+    print("✅ OPA Server SSL configured (TLSv1.2 forced for Python 3.13)")
 
     # LOG SERVER STARTUP
     if HAS_LOGGING:
@@ -562,7 +582,7 @@ def start_python_opa_server(port=8181):
                 event_type=EventType.API_REQUEST,
                 source_component="opa_server",
                 action="OPA Server started",
-                details={"port": port, "version": "1.0.0"},
+                details={"port": port, "version": "1.0.0", "ssl": "TLSv1.2"},
                 severity=Severity.INFO,
             )
         except Exception as e:
@@ -582,6 +602,7 @@ def start_python_opa_server(port=8181):
     print("📝 If file doesn't exist, default policies will be created")
     print("=" * 60)
     print(f"📊 Event logging: {'ENABLED' if HAS_LOGGING else 'DISABLED'}")
+    print(f"🔐 SSL: TLSv1.2 (Python 3.13 compatibility)")
     print("\nPress Ctrl+C to stop the server\n")
 
     try:

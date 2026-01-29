@@ -11,8 +11,18 @@ from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import hashes
 from flask import current_app
 import logging
+import sys
 import os
 
+# Apply SSL fix BEFORE any imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+try:
+    from app.ssl_fix import create_fixed_ssl_context
+
+    # The patch_requests_for_python_313() is already called when ssl_fix is imported
+except ImportError:
+    print("⚠️ SSL fix module not available, using fallback")
+    
 logger = logging.getLogger(__name__)
 
 

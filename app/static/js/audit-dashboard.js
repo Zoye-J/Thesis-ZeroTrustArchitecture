@@ -79,7 +79,7 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('Dashboard loaded');
     
     // Store socket globally for trace search
-    window.socket = io();
+    window.socket = io('https://localhost:5002');
     const socket = window.socket;
     
     // Update current time

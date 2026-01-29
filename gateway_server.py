@@ -1,4 +1,4 @@
-# gateway_server.py - UPDATED (Remove SocketIO)
+# gateway_server.py - UPDATED WITH CENTRALIZED SSL
 """
 ZTA Gateway Server - Handles client authentication (mTLS + JWT)
 Forwards authorized requests to API server
@@ -7,10 +7,10 @@ mTLS + HTTPS only - NO WebSockets
 
 import sys
 import os
-import ssl
 from flask import render_template, g
 from app.mTLS.middleware import require_authentication
 from datetime import datetime
+
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -19,6 +19,14 @@ import uuid
 from datetime import datetime
 
 from app.gateway_app import create_gateway_app
+
+# Import centralized SSL config
+try:
+    from app.ssl_config import create_ssl_context
+
+    HAS_SSL_CONFIG = True
+except ImportError:
+    HAS_SSL_CONFIG = False
 
 app = create_gateway_app()
 
@@ -318,14 +326,25 @@ if __name__ == "__main__":
     print("=" * 60)
     print(f"Port: 5000")
     print("Authentication: mTLS + JWT")
-    print("Dashboard: http://localhost:5002")
+    print("Dashboard: https://localhost:5002")
     print("=" * 60)
 
-    # Setup SSL context for mTLS
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    context.load_cert_chain("certs/server.crt", "certs/server.key")
-    context.load_verify_locations("certs/ca.crt")
-    context.verify_mode = ssl.CERT_OPTIONAL
+    # Setup SSL context using centralized config
+    if HAS_SSL_CONFIG:
+        # Use centralized SSL config for Python 3.13 compatibility
+        context = create_ssl_context(
+            verify_client=True
+        )  # Enable client verification for mTLS
+    else:
+        # Fallback to old method
+        import ssl
+
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2  # Fix for Python 3.13
+        context.maximum_version = ssl.TLSVersion.TLSv1_2
+        context.load_cert_chain("certs/server.crt", "certs/server.key")
+        context.load_verify_locations("certs/ca.crt")
+        context.verify_mode = ssl.CERT_OPTIONAL
 
     # Run with proper SSL + mTLS
     app.run(host="0.0.0.0", port=5000, ssl_context=context, debug=True)

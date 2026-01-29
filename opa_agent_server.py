@@ -1,6 +1,7 @@
 """
 OPA Agent Server with Encryption
 Runs on Port 8282
+Uses centralized SSL config
 """
 
 from flask import Flask, request, jsonify, g
@@ -10,6 +11,14 @@ import logging
 import ssl
 from app.logs.zta_event_logger import event_logger, EventType, Severity
 import json  # Add this import
+
+# Import centralized SSL config
+try:
+    from app.ssl_config import create_ssl_context
+
+    HAS_SSL_CONFIG = True
+except ImportError:
+    HAS_SSL_CONFIG = False
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -355,8 +364,18 @@ def create_opa_agent_app():
 
 
 if __name__ == "__main__":
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    context.load_cert_chain("certs/server.crt", "certs/server.key")
+    # Use centralized SSL config if available
+    if HAS_SSL_CONFIG:
+        context = create_ssl_context(verify_client=False)
+    else:
+        # Fallback to old method
+        import ssl
+
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2  # Fix for Python 3.13
+        context.maximum_version = ssl.TLSVersion.TLSv1_2
+        context.load_cert_chain("certs/server.crt", "certs/server.key")
+
     app = create_opa_agent_app()
 
     # Log server startup
