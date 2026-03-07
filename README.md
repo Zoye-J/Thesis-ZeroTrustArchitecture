@@ -1,4 +1,4 @@
-# Zero Trust Architecture for Government Document Classification System
+# Zero Trust Architecture (Government Document Classification System)
 
 ## Thesis Project - [BRAC university]
 
