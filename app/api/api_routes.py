@@ -96,16 +96,25 @@ def get_document(document_id):
         if not user_claims:
             return jsonify({"error": "User claims required"}), 400
 
-        document = GovernmentDocument.query.get_or_404(document_id)
+        document = GovernmentDocument.query.get(document_id)
 
+        if not document:
+            return jsonify({"error": "Document not found"}), 404
+
+        # Return as resource format for consistency
         return (
             jsonify(
                 {
-                    "document": document.to_dict(),
-                    "zta_context": {
-                        "server": "api_server",
-                        "request_id": g.request_id,
-                    },
+                    "id": document.id,
+                    "name": document.title,
+                    "title": document.title,
+                    "description": document.description,
+                    "content": document.content,
+                    "tier": document.classification,
+                    "department": document.department,
+                    "facility": document.facility,
+                    "category": document.category,
+                    "document_id": document.document_id,
                 }
             ),
             200,

@@ -284,22 +284,24 @@ class EncryptedServiceCommunicator:
     def _build_resource_request_data(
         self, flask_request, user_claims, resource_id, request_id
     ):
-        """Build request data for OPA Agent - FIXED for proper size"""
+        """Build request data for OPA Agent - MUST use correct resource"""
         try:
             from app.models.user import GovernmentDocument
 
+            # IMPORTANT: Get the SPECIFIC resource by ID, not a fallback
             resource = GovernmentDocument.query.get(resource_id)
-            if not resource:
-                # Try to get any resource for testing
-                resource = GovernmentDocument.query.first()
-                if not resource:
-                    raise ValueError("No resources found in database")
-                print(
-                    f"⚠️ Resource {resource_id} not found, using first available: {resource.id}"
-                )
-                resource_id = resource.id
 
-            # Map classification - CRITICAL
+            if not resource:
+                logger.error(
+                    f"[{request_id}] Resource {resource_id} not found in database"
+                )
+                raise ValueError(f"Resource {resource_id} not found")
+
+            logger.info(
+                f"[{request_id}] Found resource: {resource.title} (Dept: {resource.department}, Class: {resource.classification})"
+            )
+
+            # Map classification for OPA
             classification_map = {
                 "PUBLIC": "BASIC",
                 "DEPARTMENT": "CONFIDENTIAL",
@@ -310,75 +312,41 @@ class EncryptedServiceCommunicator:
                 resource.classification, "BASIC"
             )
 
-            # Build MINIMAL data for encryption (under 214 bytes)
+            # Build MINIMAL data for encryption
             minimal_data = {
-                "user": {
-                    "id": user_claims.get("sub"),
-                    "username": user_claims.get("username"),
-                    "clearance": user_claims.get(
-                        "clearance_level", "BASIC"
-                    ),  # KEY FIELD
-                    "department": user_claims.get("department", ""),  # KEY FIELD
-                },
-                "resource": {
-                    "id": resource_id,
-                    "classification": opa_classification,  # KEY FIELD
-                    "department": resource.department,  # KEY FIELD
-                    "type": "document",
-                },
-                "environment": {
-                    "current_hour": datetime.now().hour,  # KEY FOR TOP_SECRET
-                },
-                "request_id": request_id,
-            }
-
-            # Calculate size
-            import json
-
-            data_str = json.dumps(minimal_data, separators=(",", ":"))
-            data_size = len(data_str.encode("utf-8"))
-
-            print(f"📦 Minimal data size: {data_size} bytes (max 214)")
-
-            if data_size > 200:
-                # Further reduce size if needed
-                minimal_data = {
-                    "u": {  # User
-                        "c": user_claims.get("clearance_level", "BASIC"),  # clearance
-                        "d": user_claims.get("department", ""),  # department
-                    },
-                    "r": {  # Resource
-                        "c": opa_classification,  # classification
-                        "d": resource.department,  # department
-                    },
-                    "e": {  # Environment
-                        "h": datetime.now().hour,  # hour
-                    },
-                    "id": request_id,
-                }
-                data_str = json.dumps(minimal_data, separators=(",", ":"))
-                data_size = len(data_str.encode("utf-8"))
-                print(f"📦 Ultra-minimal data size: {data_size} bytes")
-
-            return minimal_data
-
-        except Exception as e:
-            logger.error(f"[{request_id}] Failed to build resource data: {e}")
-            # Absolute minimal fallback
-            return {
                 "u": {  # User
                     "c": user_claims.get("clearance_level", "BASIC"),
                     "d": user_claims.get("department", ""),
                 },
                 "r": {  # Resource
-                    "c": "CONFIDENTIAL",  # Default
-                    "d": user_claims.get("department", ""),
+                    "c": opa_classification,
+                    "d": resource.department,
+                    "id": resource_id,
                 },
                 "e": {  # Environment
                     "h": datetime.now().hour,
                 },
                 "id": request_id,
+                # ADD THESE FIELDS FOR API CALL
+                "endpoint": f"/documents/{resource_id}",  # ✅ FIXED: matches API Server routes
+                "method": "GET",
+                "user": {
+                    "id": user_claims.get("sub"),
+                    "username": user_claims.get("username"),
+                    "department": user_claims.get("department"),
+                    "clearance": user_claims.get("clearance_level"),
+                },
             }
+
+            logger.info(
+                f"[{request_id}] Built request for endpoint: {minimal_data['endpoint']}"
+            )
+
+            return minimal_data
+
+        except Exception as e:
+            logger.error(f"[{request_id}] Failed to build resource data: {e}")
+            raise
 
     def _handle_direct_resource_call(self, flask_request, user_claims, request_id):
         """Fallback direct call to API Server"""

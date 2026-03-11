@@ -1,4 +1,18 @@
 # app/opa_agent/agent.py
+
+import sys
+import os
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+try:
+    from app.ssl_fix import get_ssl_fixed_session, patch_requests_library
+
+    patch_requests_library()
+    HAS_SSL_FIX = True
+except ImportError:
+    HAS_SSL_FIX = False
+    print("⚠️ SSL fix not available in agent.py")
+
 import json
 import requests
 from flask import current_app
@@ -81,8 +95,21 @@ class OpaAgent:
         return private_key, public_key
 
     def decrypt_request(self, encrypted_data):
-        """Decrypt incoming request from Gateway"""
+        """Decrypt incoming request from Gateway - handles hybrid encryption"""
         try:
+            # Check if this is hybrid encrypted (starts with {)
+            if encrypted_data.startswith("{"):
+                try:
+                    package = json.loads(encrypted_data)
+                    if package.get("type") == "hybrid":
+                        # Use crypto_handler's hybrid decryption
+                        return self.crypto._hybrid_decrypt(
+                            package, self.agent_private_key
+                        )
+                except:
+                    pass  # Not JSON or not hybrid, continue with direct
+
+            # Direct RSA decryption
             return self.crypto.decrypt_from_user(encrypted_data, self.agent_private_key)
         except Exception as e:
             logger.error(f"Failed to decrypt request: {e}")
@@ -150,22 +177,32 @@ class OpaAgent:
             # Prepare input for OPA
             opa_input = self._prepare_opa_input(request_data)
 
-            # Use session with SSL verification disabled (for self-signed certs)
-            import requests
+            # USE THE SSL-FIXED SESSION instead of creating a new one
+            from app.ssl_fix import get_ssl_fixed_session
 
-            session = requests.Session()
-            session.verify = False  # Disable SSL verification for self-signed certs
+            session = get_ssl_fixed_session()
 
+            # The session already has proper SSL context
             response = session.post(
                 f"{self.opa_url}/v1/data/zta/allow",
                 json={"input": opa_input},
                 timeout=5,
+                # NO verify parameter - SSL context handles it
             )
 
             if response.status_code == 200:
                 result = response.json()
                 logger.info(f"OPA Server response: {result}")
-                return result
+
+                # Return in the format expected by opa_agent_server.py
+                # The server expects "result" and "reason" fields
+                if isinstance(result, dict):
+                    return {
+                        "result": result.get("result", False),
+                        "reason": result.get("reason", "No reason provided"),
+                        "decision": result.get("decision", {}),
+                    }
+                return {"result": False, "reason": "Invalid response format"}
             else:
                 logger.error(
                     f"OPA Server error: {response.status_code} - {response.text}"
@@ -183,55 +220,81 @@ class OpaAgent:
         """Call API Server after OPA approval"""
         try:
             # Extract the actual API endpoint and method
-            endpoint = request_info.get("endpoint", "/api/documents")
+            endpoint = request_info.get("endpoint")  # ← NO FALLBACK
             method = request_info.get("method", "GET").upper()
             data = request_info.get("data")
             user_claims = request_info.get("user", {})
 
+            # CRITICAL: If no endpoint, this is an error - DENY ACCESS
+            if not endpoint:
+                logger.error("No endpoint provided in request_info - DENYING ACCESS")
+                return {
+                    "status_code": 403,
+                    "error": "No endpoint specified",
+                    "success": False,
+                }
+
             logger.info(f"Calling API Server: {method} {endpoint}")
 
-            # Prepare headers for API Server
+            # Prepare headers for API Server - USE THE CORRECT SERVICE TOKEN
             headers = {
                 "Content-Type": "application/json",
-                "X-Service-Token": "opa-agent-service-token",
+                "X-Service-Token": "api-token-2024-zta",  # ← MUST match api_server.py
                 "X-Request-ID": request_info.get("request_id", "unknown"),
                 "X-User-Claims": json.dumps(user_claims),
                 "X-Forwarded-By": "OPA-Agent",
             }
 
+            # Log the headers (without sensitive data)
+            logger.info(
+                f"Request headers: X-Service-Token present, X-Request-ID: {headers['X-Request-ID']}"
+            )
+
+            # Use SSL-fixed session
+            from app.ssl_fix import get_ssl_fixed_session
+
+            session = get_ssl_fixed_session()
+
             # Make the request to API Server
+            url = f"{self.api_server_url}{endpoint}"
+            logger.info(f"Making request to: {url}")
+
             if method == "POST":
-                response = requests.post(
-                    f"{self.api_server_url}{endpoint}",
+                response = session.post(
+                    url,
                     json=data,
                     headers=headers,
                     timeout=10,
-                    verify=False,  # For self-signed certs
                 )
             elif method == "PUT":
-                response = requests.put(
-                    f"{self.api_server_url}{endpoint}",
+                response = session.put(
+                    url,
                     json=data,
                     headers=headers,
                     timeout=10,
-                    verify=False,
                 )
             elif method == "DELETE":
-                response = requests.delete(
-                    f"{self.api_server_url}{endpoint}",
+                response = session.delete(
+                    url,
                     headers=headers,
                     timeout=10,
-                    verify=False,
                 )
             else:  # GET
-                response = requests.get(
-                    f"{self.api_server_url}{endpoint}",
+                response = session.get(
+                    url,
                     headers=headers,
                     timeout=10,
-                    verify=False,
                 )
 
             logger.info(f"API Server response status: {response.status_code}")
+
+            # If we got 401, log the response body for debugging
+            if response.status_code == 401:
+                try:
+                    error_body = response.text
+                    logger.error(f"API Server 401 response: {error_body[:200]}")
+                except:
+                    pass
 
             # Prepare response
             api_response = {
@@ -279,21 +342,24 @@ class OpaAgent:
             resource_data = request_data.get("r", {})
             env_data = request_data.get("e", {})
 
-            # Expand minimal format
+            # Map the field names correctly for OPA
+            # OPA expects: input.user.clearance, input.resource.classification
             user = {
                 "id": 0,
                 "username": "user",
                 "role": "user",
                 "department": user_data.get("d", ""),
                 "facility": "",
-                "clearance": user_data.get("c", "BASIC"),
+                "clearance": user_data.get("c", "BASIC"),  # This maps correctly
                 "email": "",
             }
             resource = {
                 "type": "document",
                 "id": resource_data.get("id"),
-                "classification": resource_data.get("c", "BASIC"),
-                "department": resource_data.get("d", ""),
+                "classification": resource_data.get(
+                    "c", "BASIC"
+                ),  # This maps correctly
+                "department": resource_data.get("d", ""),  # Department name
                 "facility": "",
                 "category": "",
             }
@@ -303,6 +369,14 @@ class OpaAgent:
                 "client_ip": "127.0.0.1",
             }
             request_id = request_data.get("id", "unknown")
+
+            # IMPORTANT: Log what we're sending to OPA
+            print(
+                f"🔍 Sending to OPA - User dept: {user['department']}, Resource dept: {resource['department']}"
+            )
+            print(
+                f"🔍 User clearance: {user['clearance']}, Resource class: {resource['classification']}"
+            )
 
         else:  # Full format
             user = request_data.get("user", {})

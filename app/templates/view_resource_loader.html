@@ -1,8 +1,24 @@
 {% extends "base.html" %}
 
 {% block title %}Loading Resource - Government ZTA System{% endblock %}
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/zta-encryption.js') }}"></script>
+<script>
+// Ensure ztaEncryptor is loaded before anything else
+window.ZTA_LOADED = false;
+document.addEventListener('DOMContentLoaded', function() {
+    if (window.ztaEncryptor) {
+        window.ZTA_LOADED = true;
+        console.log('✅ ztaEncryptor loaded from script tag');
+    } else {
+        console.error('❌ ztaEncryptor not loaded - check script path');
+    }
+});
+</script>
+{% endblock %}
 
 {% block extra_css %}
+
 <style>
     .zta-flow-diagram {
         background: #f8f9fa;

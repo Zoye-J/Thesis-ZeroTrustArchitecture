@@ -158,18 +158,6 @@ def create_opa_agent_app():
             )
 
             # Step 3: Forward to OPA Server for policy evaluation
-            event_logger.log_event(
-                event_type=EventType.OPA_REQUEST_SENT,
-                source_component="opa_agent",
-                action="Sending request to OPA Server for policy evaluation",
-                trace_id=trace_id,
-                details={
-                    "request_id": request_id,
-                    "opa_server_url": "https://localhost:8181",
-                },
-                severity=Severity.INFO,
-            )
-
             opa_result = agent.query_opa_server(request_info)
 
             # Log OPA response
@@ -180,18 +168,20 @@ def create_opa_agent_app():
                 trace_id=trace_id,
                 details={
                     "request_id": request_id,
-                    "allowed": opa_result.get("allow", False),
+                    "allowed": opa_result.get(
+                        "result", False
+                    ),  # ✅ FIXED: use "result"
                     "reason": opa_result.get("reason", "No reason provided"),
                 },
                 severity=Severity.INFO,
             )
 
             # Step 4: Check if access is allowed
-            if not opa_result.get("allow", False):
+            if not opa_result.get("result", False):  # ✅ FIXED: use "result"
                 # Access denied - still encrypt response
                 response_data = {
                     "allowed": False,
-                    "reason": opa_result.get("reason", "Access denied"),
+                    "reason": opa_result.get("reason", "Access denied by policy"),
                     "opa_result": opa_result,
                 }
 

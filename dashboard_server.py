@@ -179,22 +179,12 @@ def get_servers_status():
 
 if __name__ == "__main__":
     print("=" * 60)
-<<<<<<< HEAD
     print(" ZTA REAL-TIME DASHBOARD SERVER (HTTPS)")
     print("=" * 60)
     print(f" Port: 5002")
     print(f" URL: https://localhost:5002")
     print(f" WebSocket: Enabled (threading mode)")
     print(f" Protocol: HTTPS")
-=======
-    print("🚀 ZTA REAL-TIME DASHBOARD SERVER (HTTPS)")
-    print("=" * 60)
-    print(f"📊 Port: 5002")
-    print(f"🔗 URL: https://localhost:5002")
-    print(f"📈 Live Events: https://localhost:5002/live")
-    print(f"🔌 WebSocket: Enabled (threading mode)")
-    print(f"🔐 Protocol: HTTPS")
->>>>>>> 7a18c90c8355e5456552baf7e8b1720973772e89
     print("=" * 60)
     print("Monitoring servers on:")
     print("• Gateway: https://localhost:5000")

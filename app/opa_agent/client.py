@@ -15,6 +15,8 @@ from flask import current_app
 import logging
 import sys
 import os
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.backends import default_backend
 
 
 # Apply SSL fix - get the fixed session
@@ -69,7 +71,7 @@ class OpaAgentClient:
         )
 
     def encrypt_for_agent(self, data):
-        """Encrypt data with OPA Agent's public key"""
+        """Encrypt data with OPA Agent's public key - WITH HYBRID ENCRYPTION for large data"""
         try:
             logger.debug(f"🔐 Encrypting data for OPA Agent")
 
@@ -81,38 +83,84 @@ class OpaAgentClient:
             data_str = json.dumps(data, separators=(",", ":"))
             data_bytes = data_str.encode("utf-8")
 
-            # Check size for RSA-2048 (max ~214 bytes with OAEP)
-            max_size = 214
-            if len(data_bytes) > max_size:
-                logger.error(f"❌ Data too large: {len(data_bytes)} > {max_size} bytes")
-                raise ValueError(
-                    f"Data too large for RSA encryption ({len(data_bytes)} bytes)"
-                )
-
             # Load public key
             public_key = serialization.load_pem_public_key(
                 self.agent_public_key.encode()
             )
 
-            # Encrypt
+            # Check size for RSA-2048 (max ~214 bytes with OAEP)
+            max_rsa_size = 190  # Conservative limit
 
-            encrypted = public_key.encrypt(
-                data_bytes,
-                padding.OAEP(
-                    mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                    algorithm=hashes.SHA256(),
-                    label=None,
-                ),
-            )
+            if len(data_bytes) <= max_rsa_size:
+                # Direct RSA encryption for small data
+                logger.debug(
+                    f"📏 Using direct RSA encryption ({len(data_bytes)} bytes)"
+                )
+                encrypted = public_key.encrypt(
+                    data_bytes,
+                    padding.OAEP(
+                        mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                        algorithm=hashes.SHA256(),
+                        label=None,
+                    ),
+                )
+                encrypted_b64 = base64.b64encode(encrypted).decode("utf-8")
+                logger.debug(
+                    f"✅ Direct encryption successful: {len(encrypted_b64)} chars"
+                )
+                return encrypted_b64
+            else:
+                # HYBRID ENCRYPTION for large data
+                logger.debug(
+                    f"📏 Data too large for RSA ({len(data_bytes)} > {max_rsa_size}), using hybrid encryption"
+                )
 
-            # Convert to base64
-            encrypted_b64 = base64.b64encode(encrypted).decode("utf-8")
-            logger.debug(f"✅ Encryption successful: {len(encrypted_b64)} chars")
+                # Generate random AES key and IV
+                aes_key = os.urandom(32)  # 256-bit
+                iv = os.urandom(12)  # 96-bit for GCM recommended
 
-            return encrypted_b64
+                from cryptography.hazmat.primitives.ciphers import (
+                    Cipher,
+                    algorithms,
+                    modes,
+                )
+                from cryptography.hazmat.backends import default_backend
+
+                # Encrypt data with AES-GCM
+                encryptor = Cipher(
+                    algorithms.AES(aes_key), modes.GCM(iv), backend=default_backend()
+                ).encryptor()
+
+                encrypted_data = encryptor.update(data_bytes) + encryptor.finalize()
+                tag = encryptor.tag
+
+                # Encrypt AES key with RSA
+                encrypted_key = public_key.encrypt(
+                    aes_key,
+                    padding.OAEP(
+                        mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                        algorithm=hashes.SHA256(),
+                        label=None,
+                    ),
+                )
+
+                # Package everything
+                result = {
+                    "type": "hybrid",
+                    "encrypted_key": base64.b64encode(encrypted_key).decode("utf-8"),
+                    "encrypted_data": base64.b64encode(encrypted_data).decode("utf-8"),
+                    "iv": base64.b64encode(iv).decode("utf-8"),
+                    "tag": base64.b64encode(tag).decode("utf-8"),
+                    "algorithm": "RSA-OAEP-SHA256 + AES-256-GCM",
+                }
+
+                result_json = json.dumps(result)
+                logger.debug(
+                    f"✅ Hybrid encryption successful: {len(result_json)} chars"
+                )
+                return result_json
 
         except Exception as e:
-
             logger.error(f"❌ Encryption failed: {e}")
             raise
 

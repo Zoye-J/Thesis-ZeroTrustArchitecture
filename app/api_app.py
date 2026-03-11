@@ -10,6 +10,7 @@ from datetime import datetime
 from app import cors
 from app.config import DevelopmentConfig
 from app.api_models import db
+from app.models.user import GovernmentDocument
 
 
 def create_api_app(config_name="development"):
@@ -50,8 +51,8 @@ def create_api_app(config_name="development"):
 
     # ======== ADD RESOURCES ENDPOINT ========
     @api_bp.route("/resources", methods=["GET"])
-    def get_resources():
-        """Get department-based resources"""
+    def get_resources_api():
+        """Get resources from database for API calls"""
         try:
             user_claims = g.get("user_claims", {})
             if not user_claims:
@@ -59,92 +60,70 @@ def create_api_app(config_name="development"):
 
             user_department = user_claims.get("department")
             user_clearance = user_claims.get("clearance_level", "BASIC")
-
-            # Current hour for time-based restrictions
             current_hour = datetime.now().hour
 
-            # Define resources based on department
-            all_resources = [
-                {
-                    "id": 1,
-                    "name": "Public Notice Board",
-                    "tier": "PUBLIC",
-                    "department": "ALL",
-                },
-                {
-                    "id": 2,
-                    "name": "Government Circulars",
-                    "tier": "PUBLIC",
-                    "department": "ALL",
-                },
-                {
-                    "id": 3,
-                    "name": "MOD Operations Brief",
-                    "tier": "DEPARTMENT",
-                    "department": "MOD",
-                },
-                {
-                    "id": 4,
-                    "name": "MOD Budget Report",
-                    "tier": "DEPARTMENT",
-                    "department": "MOD",
-                },
-                {
-                    "id": 5,
-                    "name": "Top Secret MOD Plans",
-                    "tier": "TOP_SECRET",
-                    "department": "MOD",
-                },
-                {
-                    "id": 6,
-                    "name": "MOF Fiscal Policy",
-                    "tier": "DEPARTMENT",
-                    "department": "MOF",
-                },
-                {
-                    "id": 7,
-                    "name": "MOF Budget Documents",
-                    "tier": "DEPARTMENT",
-                    "department": "MOF",
-                },
-                {
-                    "id": 8,
-                    "name": "NSA Cyber Reports",
-                    "tier": "DEPARTMENT",
-                    "department": "NSA",
-                },
-                {
-                    "id": 9,
-                    "name": "NSA Threat Assessment",
-                    "tier": "DEPARTMENT",
-                    "department": "NSA",
-                },
-            ]
+            # Get all non-archived documents
+            documents = GovernmentDocument.query.filter_by(is_archived=False).all()
+
+            # Map database classifications to tier names
+            classification_map = {
+                "PUBLIC": "PUBLIC",
+                "DEPARTMENT": "DEPARTMENT",
+                "TOP_SECRET": "TOP_SECRET",
+                "CONFIDENTIAL": "DEPARTMENT",  # If you have this
+                "SECRET": "DEPARTMENT",  # If you have this
+            }
 
             # Filter resources based on department and clearance
             filtered_resources = []
-            for resource in all_resources:
-                if resource["tier"] == "PUBLIC":
-                    filtered_resources.append(resource)
-                elif (
-                    resource["tier"] == "DEPARTMENT"
-                    and resource["department"] == user_department
-                ):
-                    filtered_resources.append(resource)
-                elif (
-                    resource["tier"] == "TOP_SECRET"
-                    and resource["department"] == user_department
-                ):
-                    # Check time restriction (8 AM - 4 PM)
-                    if 8 <= current_hour < 16:
-                        filtered_resources.append(resource)
-                    else:
-                        resource_copy = resource.copy()
-                        resource_copy["name"] = (
-                            "🔒 Top Secret (Available 8 AM - 4 PM Only)"
-                        )
-                        resource_copy["restricted"] = True
-                        filtered_resources.append(resource_copy)
+            for doc in documents:
+                tier = classification_map.get(doc.classification, "PUBLIC")
+
+                # Apply access rules
+                if tier == "PUBLIC":
+                    filtered_resources.append(
+                        {
+                            "id": doc.id,
+                            "name": doc.title,
+                            "tier": "PUBLIC",
+                            "department": doc.department,
+                            "description": doc.description,
+                        }
+                    )
+                elif tier == "DEPARTMENT" and doc.department == user_department:
+                    filtered_resources.append(
+                        {
+                            "id": doc.id,
+                            "name": doc.title,
+                            "tier": "DEPARTMENT",
+                            "department": doc.department,
+                            "description": doc.description,
+                        }
+                    )
+                elif tier == "TOP_SECRET" and doc.department == user_department:
+                    # Check clearance and time
+                    if user_clearance in ["SECRET", "TOP_SECRET"]:
+                        if 8 <= current_hour < 16:
+                            filtered_resources.append(
+                                {
+                                    "id": doc.id,
+                                    "name": doc.title,
+                                    "tier": "TOP_SECRET",
+                                    "department": doc.department,
+                                    "description": doc.description,
+                                }
+                            )
+                        else:
+                            # Show as restricted
+                            filtered_resources.append(
+                                {
+                                    "id": doc.id,
+                                    "name": f"🔒 {doc.title} (Available 8 AM - 4 PM)",
+                                    "tier": "TOP_SECRET",
+                                    "department": doc.department,
+                                    "restricted": True,
+                                }
+                            )
 
             return jsonify(
                 {

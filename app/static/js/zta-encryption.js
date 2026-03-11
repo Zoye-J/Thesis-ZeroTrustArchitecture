@@ -719,21 +719,51 @@ window.ztaEncryptor = new ZTAEncryption();
 
 // Auto-initialize when page loads
 document.addEventListener('DOMContentLoaded', async () => {
+    // Wait for ztaEncryptor to be available (retry up to 5 times)
+    let retries = 0;
+    const maxRetries = 5;
+    
+    while (!window.ztaEncryptor && retries < maxRetries) {
+        console.log(`Waiting for ztaEncryptor... (${retries + 1}/${maxRetries})`);
+        await new Promise(resolve => setTimeout(resolve, 500));
+        retries++;
+    }
+    
+    if (!window.ztaEncryptor) {
+        console.error('❌ ztaEncryptor failed to load after 5 retries');
+        showError('Security module failed to load - please refresh the page');
+        return;
+    }
+    
+    console.log('✅ ztaEncryptor loaded successfully');
+    
+    // Initialize encryption
     try {
-        // Initialize automated setup
-        await window.ztaAutomatedSetup.initDB();
-        console.log('ZTA Automated Setup initialized');
-        
-        // Initialize encryption
         await window.ztaEncryptor.init();
-        
-        // Enable auto-security attachment
-        await window.ztaEncryptor.enableAutoSecurity();
-        
-        console.log('ZTA Security System fully initialized');
+        console.log('✅ Encryption initialized');
     } catch (error) {
-        console.warn('ZTA initialization warning:', error);
-        // Continue anyway - system can work without full encryption
+        console.error('❌ Encryption init failed:', error);
+    }
+    
+    // Check if we have a stored encrypted response
+    const storedResourceId = sessionStorage.getItem('current_resource_id');
+    const storedResponse = sessionStorage.getItem('encrypted_response');
+    
+    if (storedResourceId && storedResponse && parseInt(storedResourceId) === resourceId) {
+        console.log('✅ Using stored encrypted response');
+        sessionStorage.removeItem('current_resource_id');
+        sessionStorage.removeItem('encrypted_response');
+        
+        const result = JSON.parse(storedResponse);
+        updateStep(1, 'completed', 'JWT verified');
+        updateStep(2, 'completed', 'Request encrypted');
+        updateStep(3, 'completed', 'Policy evaluation');
+        updateStep(4, 'completed', 'Resource fetched');
+        
+        await decryptAndDisplay(result.encrypted_response);
+    } else {
+        console.log('⚠️ No stored response, fetching fresh...');
+        setTimeout(fetchResourceThroughOPA, 300);
     }
 });
 
