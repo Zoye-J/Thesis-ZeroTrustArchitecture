@@ -1,0 +1,293 @@
+{% extends "base.html" %}
+
+{% block title %}User Management - Government System{% endblock %}
+
+{% block extra_css %}
+<style>
+    .users-container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 2rem;
+    }
+    
+    .header-section {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 2rem;
+    }
+    
+    .header-section h1 {
+        color: #1a237e;
+        margin: 0;
+    }
+    
+    .add-user-btn {
+        background: #1a237e;
+        color: white;
+        border: none;
+        padding: 0.75rem 1.5rem;
+        border-radius: 5px;
+        font-size: 1rem;
+        font-weight: bold;
+        cursor: pointer;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .users-table {
+        width: 100%;
+        background: white;
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    
+    .table-header {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 0.5fr;
+        background: #1a237e;
+        color: white;
+        padding: 1rem;
+        font-weight: bold;
+    }
+    
+    .table-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 0.5fr;
+        padding: 1rem;
+        border-bottom: 1px solid #eee;
+        align-items: center;
+    }
+    
+    .table-row:hover {
+        background: #f8f9fa;
+    }
+    
+    .user-avatar {
+        width: 40px;
+        height: 40px;
+        background: #1a237e;
+        color: white;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        font-size: 1.2rem;
+    }
+    
+    .user-info {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+    }
+    
+    .user-details {
+        display: flex;
+        flex-direction: column;
+    }
+    
+    .user-name {
+        font-weight: bold;
+        color: #333;
+    }
+    
+    .user-email {
+        color: #666;
+        font-size: 0.9rem;
+    }
+    
+    .role-badge, .clearance-badge, .status-badge {
+        display: inline-block;
+        padding: 0.25rem 0.75rem;
+        border-radius: 12px;
+        font-size: 0.8rem;
+        font-weight: bold;
+    }
+    
+    .role-user { background: #e3f2fd; color: #1565c0; }
+    .role-admin { background: #e8f5e9; color: #2e7d32; }
+    .role-superadmin { background: #fce4ec; color: #c2185b; }
+    
+    .clearance-basic { background: #4caf50; color: white; }
+    .clearance-confidential { background: #ff9800; color: white; }
+    .clearance-secret { background: #f44336; color: white; }
+    .clearance-top-secret { background: #9c27b0; color: white; }
+    
+    .status-active { background: #4caf50; color: white; }
+    .status-inactive { background: #f44336; color: white; }
+    
+    .action-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 1.2rem;
+        color: #666;
+        transition: color 0.3s;
+    }
+    
+    .action-btn:hover {
+        color: #1a237e;
+    }
+    
+    .facility-badge {
+        display: inline-block;
+        background: #1a237e;
+        color: white;
+        padding: 0.5rem 1rem;
+        border-radius: 20px;
+        font-size: 0.9rem;
+        margin-bottom: 2rem;
+    }
+    
+    .loading {
+        text-align: center;
+        padding: 2rem;
+        color: #666;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="users-container">
+    <div class="facility-badge">
+        🏛️ {{ user.facility }} | 👤 {{ user.user_class|title }}
+    </div>
+    
+    <div class="header-section">
+        <h1>👥 User Management</h1>
+        <button class="add-user-btn" onclick="window.location.href='/register-user'">
+            <span>+</span> Add New User
+        </button>
+    </div>
+    
+    <div id="loading" class="loading">
+        Loading users...
+    </div>
+    
+    <div id="usersTable" style="display: none;">
+        <div class="table-header">
+            <div>User</div>
+            <div>Role</div>
+            <div>Department</div>
+            <div>Clearance</div>
+            <div>Facility</div>
+            <div>Status</div>
+            <div>Actions</div>
+        </div>
+        <div id="usersList"></div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', async function() {
+    await loadUsers();
+});
+
+async function loadUsers() {
+    try {
+        const token = localStorage.getItem('access_token');
+        
+        if (!token) {
+            window.location.href = '/';
+            return;
+        }
+        
+        // Fetch users from API
+        const response = await fetch('/api/users', {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.status === 401) {
+            window.dispatchEvent(new Event('unauthenticated'));
+            return;
+        }
+        
+        if (!response.ok) {
+            throw new Error('Failed to fetch users');
+        }
+        
+        const data = await response.json();
+        
+        // Hide loading, show table
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('usersTable').style.display = 'block';
+        
+        // Populate users list
+        const usersList = document.getElementById('usersList');
+        usersList.innerHTML = '';
+        
+        data.users.forEach(user => {
+            const row = document.createElement('div');
+            row.className = 'table-row';
+            
+            // Get first letter for avatar
+            const firstLetter = user.username.charAt(0).toUpperCase();
+            
+            // Format clearance badge
+            let clearanceClass = '';
+            switch(user.clearance_level) {
+                case 'BASIC': clearanceClass = 'clearance-basic'; break;
+                case 'CONFIDENTIAL': clearanceClass = 'clearance-confidential'; break;
+                case 'SECRET': clearanceClass = 'clearance-secret'; break;
+                case 'TOP_SECRET': clearanceClass = 'clearance-top-secret'; break;
+            }
+            
+            // Format role badge
+            let roleClass = '';
+            switch(user.user_class) {
+                case 'user': roleClass = 'role-user'; break;
+                case 'admin': roleClass = 'role-admin'; break;
+                case 'superadmin': roleClass = 'role-superadmin'; break;
+            }
+            
+            row.innerHTML = `
+                <div class="user-info">
+                    <div class="user-avatar">${firstLetter}</div>
+                    <div class="user-details">
+                        <div class="user-name">${user.username}</div>
+                        <div class="user-email">${user.email}</div>
+                    </div>
+                </div>
+                <div><span class="role-badge ${roleClass}">${user.user_class.toUpperCase()}</span></div>
+                <div>${user.department}</div>
+                <div><span class="clearance-badge ${clearanceClass}">${user.clearance_level}</span></div>
+                <div>${user.facility}</div>
+                <div><span class="status-badge status-${user.is_active ? 'active' : 'inactive'}">
+                    ${user.is_active ? 'ACTIVE' : 'INACTIVE'}
+                </span></div>
+                <div>
+                    <button class="action-btn" title="View Details" onclick="viewUser(${user.id})">👁️</button>
+                    <button class="action-btn" title="Edit User" onclick="editUser(${user.id})">✏️</button>
+                </div>
+            `;
+            
+            usersList.appendChild(row);
+        });
+        
+    } catch (error) {
+        document.getElementById('loading').innerHTML = `
+            <div style="color: #f44336;">
+                Error loading users: ${error.message}
+            </div>
+            <button onclick="window.location.href='/dashboard'" style="margin-top: 1rem;">
+                ← Back to Dashboard
+            </button>
+        `;
+    }
+}
+
+function viewUser(userId) {
+    alert(`View user details for ID: ${userId}\n\nThis feature will show detailed user information, access logs, and permissions.`);
+}
+
+function editUser(userId) {
+    alert(`Edit user with ID: ${userId}\n\nThis feature will allow you to modify user details, change roles, or deactivate accounts.`);
+}
+</script>
+{% endblock %}

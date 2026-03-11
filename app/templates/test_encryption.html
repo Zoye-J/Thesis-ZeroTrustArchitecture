@@ -1,0 +1,258 @@
+<!-- CREATE: app/templates/test_encryption.html -->
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <h1>🔐 ZTA Encryption Test</h1>
+    
+    <div class="card">
+        <div class="card-body">
+            <h3>Encryption Status</h3>
+            <div id="status" class="alert alert-info">
+                Initializing encryption system...
+            </div>
+            
+            <button id="test-btn" class="btn btn-primary" onclick="runEncryptionTest()">
+                Run Encryption Test
+            </button>
+            
+            <button id="get-key-btn" class="btn btn-secondary" onclick="getOPAAgentKey()">
+                Get OPA Agent Public Key
+            </button>
+            
+            <div id="results" class="mt-4" style="display: none;">
+                <h4>Test Results</h4>
+                <pre id="results-output" class="bg-light p-3"></pre>
+            </div>
+        </div>
+    </div>
+    
+    <div class="card mt-4">
+        <div class="card-body">
+            <h3>Send Encrypted Request</h3>
+            <div class="form-group">
+                <label>API Endpoint:</label>
+                <input type="text" id="endpoint" class="form-control" 
+                       value="/api/documents" placeholder="/api/documents">
+            </div>
+            <div class="form-group">
+                <label>Method:</label>
+                <select id="method" class="form-control">
+                    <option value="GET">GET</option>
+                    <option value="POST">POST</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>User ID (for testing):</label>
+                <input type="text" id="user-id" class="form-control" 
+                       value="1" placeholder="User ID">
+            </div>
+            <button id="send-btn" class="btn btn-success" onclick="sendEncryptedRequest()">
+                Send Encrypted Request
+            </button>
+            <div id="request-results" class="mt-3"></div>
+        </div>
+    </div>
+    
+    <div class="card mt-4">
+        <div class="card-body">
+            <h3>Direct API Calls (for comparison)</h3>
+            <button class="btn btn-info" onclick="testDirectAPI()">
+                Test Direct API Call
+            </button>
+            <button class="btn btn-info" onclick="testGetPublicKey()">
+                Test Get Public Key API
+            </button>
+            <div id="direct-results" class="mt-3"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Global encryption instance
+let ztaEncryptor = null;
+
+document.addEventListener('DOMContentLoaded', async function() {
+    try {
+        // Initialize encryption
+        if (window.ztaEncryptor) {
+            ztaEncryptor = window.ztaEncryptor;
+            await ztaEncryptor.init();
+            document.getElementById('status').className = 'alert alert-success';
+            document.getElementById('status').textContent = '✓ Encryption: ACTIVE';
+            console.log('Encryption initialized');
+        } else {
+            throw new Error('Encryption library not loaded');
+        }
+    } catch (error) {
+        console.error('Encryption init failed:', error);
+        document.getElementById('status').className = 'alert alert-danger';
+        document.getElementById('status').textContent = '✗ Encryption: FAILED - ' + error.message;
+    }
+});
+
+async function runEncryptionTest() {
+    const statusEl = document.getElementById('status');
+    const resultsEl = document.getElementById('results');
+    const outputEl = document.getElementById('results-output');
+    
+    try {
+        statusEl.className = 'alert alert-warning';
+        statusEl.textContent = 'Testing encryption...';
+        
+        // Test data
+        const testData = {
+            message: "Hello ZTA System",
+            timestamp: new Date().toISOString(),
+            test_id: Math.random().toString(36).substring(7)
+        };
+        
+        // Get OPA Agent public key
+        const keyResponse = await fetch('/api/opa-agent-public-key');
+        const keyData = await keyResponse.json();
+        
+        // Test encryption/decryption (simplified for now)
+        outputEl.textContent = JSON.stringify({
+            step1: "Got OPA Agent public key",
+            key_algorithm: keyData.algorithm,
+            key_size: keyData.key_size,
+            test_data: testData,
+            note: "Full encryption test requires Web Crypto API implementation"
+        }, null, 2);
+        
+        resultsEl.style.display = 'block';
+        statusEl.className = 'alert alert-success';
+        statusEl.textContent = '✓ Encryption test PASSED (basic connectivity)!';
+        
+    } catch (error) {
+        statusEl.className = 'alert alert-danger';
+        statusEl.textContent = '✗ Encryption test FAILED: ' + error.message;
+        console.error(error);
+    }
+}
+
+async function getOPAAgentKey() {
+    const resultsEl = document.getElementById('results');
+    const outputEl = document.getElementById('results-output');
+    
+    try {
+        const response = await fetch('/api/opa-agent-public-key');
+        const data = await response.json();
+        
+        outputEl.textContent = JSON.stringify(data, null, 2);
+        resultsEl.style.display = 'block';
+        
+    } catch (error) {
+        outputEl.textContent = 'Error: ' + error.message;
+        resultsEl.style.display = 'block';
+    }
+}
+
+async function sendEncryptedRequest() {
+    const endpoint = document.getElementById('endpoint').value;
+    const method = document.getElementById('method').value;
+    const userId = document.getElementById('user-id').value;
+    const resultsEl = document.getElementById('request-results');
+    
+    resultsEl.innerHTML = '<div class="alert alert-info">Sending encrypted request...</div>';
+    
+    try {
+        // First, get user's public key
+        const userKeyResponse = await fetch(`/api/user-public-key/${userId}`);
+        if (!userKeyResponse.ok) {
+            throw new Error(`Failed to get user public key: ${userKeyResponse.status}`);
+        }
+        const userKeyData = await userKeyResponse.json();
+        
+        // Prepare request data
+        const requestData = {
+            endpoint: endpoint,
+            method: method,
+            timestamp: new Date().toISOString(),
+            user: { id: userId },
+            test: true
+        };
+        
+        // Send encrypted request
+        const response = await fetch('/api/encrypted-request', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                encrypted_payload: "test-encrypted-data", // Simplified for now
+                user_public_key: userKeyData.public_key
+            })
+        });
+        
+        const responseData = await response.json();
+        
+        resultsEl.innerHTML = `
+            <div class="alert ${response.ok ? 'alert-success' : 'alert-warning'}">
+                <strong>${response.ok ? '✓' : '⚠'} Request ${response.ok ? 'Sent' : 'Failed'}</strong>
+                Status: ${response.status}
+            </div>
+            <pre class="bg-light p-3">${JSON.stringify(responseData, null, 2)}</pre>
+        `;
+        
+    } catch (error) {
+        resultsEl.innerHTML = `
+            <div class="alert alert-danger">
+                <strong>✗ Request Failed:</strong> ${error.message}
+            </div>
+        `;
+        console.error(error);
+    }
+}
+
+// Direct API tests (for debugging)
+async function testDirectAPI() {
+    const resultsEl = document.getElementById('direct-results');
+    
+    try {
+        const response = await fetch('/api/documents');
+        const data = await response.json();
+        
+        resultsEl.innerHTML = `
+            <div class="alert alert-info">
+                Direct API Call Result (Status: ${response.status})
+            </div>
+            <pre class="bg-light p-3">${JSON.stringify(data, null, 2)}</pre>
+        `;
+    } catch (error) {
+        resultsEl.innerHTML = `
+            <div class="alert alert-danger">
+                Direct API Failed: ${error.message}
+            </div>
+        `;
+    }
+}
+
+async function testGetPublicKey() {
+    const resultsEl = document.getElementById('direct-results');
+    
+    try {
+        const response = await fetch('/api/opa-agent-public-key');
+        const data = await response.json();
+        
+        resultsEl.innerHTML = `
+            <div class="alert alert-info">
+                OPA Agent Public Key (Status: ${response.status})
+            </div>
+            <div class="bg-light p-3">
+                <strong>Algorithm:</strong> ${data.algorithm}<br>
+                <strong>Key Size:</strong> ${data.key_size}<br>
+                <strong>Key (first 100 chars):</strong><br>
+                <code>${data.public_key.substring(0, 100)}...</code>
+            </div>
+        `;
+    } catch (error) {
+        resultsEl.innerHTML = `
+            <div class="alert alert-danger">
+                Failed to get public key: ${error.message}
+            </div>
+        `;
+    }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,587 @@
+{% extends "base.html" %}
+
+{% block title %}Register - Government System{% endblock %}
+
+{% block extra_css %}
+<style>
+    .registration-container {
+        max-width: 500px;
+        margin: 0 auto;
+        padding: 2rem;
+    }
+    
+    .registration-card {
+        background: white;
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        padding: 2rem;
+    }
+    
+    .form-header {
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+    
+    .form-header h1 {
+        color: #1a237e;
+        margin: 0 0 0.5rem 0;
+    }
+    
+    .form-group {
+        margin-bottom: 1.5rem;
+    }
+    
+    .form-group label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: bold;
+        color: #333;
+    }
+    
+    .form-control {
+        width: 100%;
+        padding: 0.75rem;
+        border: 2px solid #ddd;
+        border-radius: 5px;
+        font-size: 1rem;
+        transition: border-color 0.3s;
+    }
+    
+    .form-control:focus {
+        outline: none;
+        border-color: #1a237e;
+    }
+    
+    .select-control {
+        width: 100%;
+        padding: 0.75rem;
+        border: 2px solid #ddd;
+        border-radius: 5px;
+        font-size: 1rem;
+        background: white;
+        cursor: pointer;
+    }
+    
+    .submit-btn {
+        background: #1a237e;
+        color: white;
+        border: none;
+        padding: 1rem 2rem;
+        border-radius: 5px;
+        font-size: 1rem;
+        font-weight: bold;
+        cursor: pointer;
+        width: 100%;
+        transition: background 0.3s;
+    }
+    
+    .submit-btn:hover {
+        background: #283593;
+    }
+    
+    .info-box {
+        background: #e3f2fd;
+        border-left: 4px solid #2196f3;
+        padding: 1rem;
+        margin-bottom: 2rem;
+        border-radius: 5px;
+    }
+    
+    .email-domain {
+        display: inline-block;
+        background: #1a237e;
+        color: white;
+        padding: 0.25rem 0.75rem;
+        border-radius: 12px;
+        font-size: 0.9rem;
+        font-weight: bold;
+        margin: 0 0.25rem;
+    }
+    
+    .alert {
+        padding: 1rem;
+        border-radius: 5px;
+        margin-bottom: 1rem;
+        display: none;
+    }
+    
+    .alert-success {
+        background: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+    }
+    
+    .alert-error {
+        background: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+    }
+    
+    .back-link {
+        display: block;
+        text-align: center;
+        margin-top: 1.5rem;
+        color: #1a237e;
+        text-decoration: none;
+    }
+    
+    .password-requirements {
+        background: #f8f9fa;
+        padding: 1rem;
+        border-radius: 5px;
+        margin-top: 0.5rem;
+        font-size: 0.9rem;
+    }
+    
+    /* Automated setup styles */
+    .automated-setup {
+        background: #f0f7ff;
+        border: 2px dashed #1a237e;
+        border-radius: 8px;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+        display: none;
+    }
+    
+    .setup-step {
+        margin: 0.75rem 0;
+        padding-left: 2rem;
+        position: relative;
+        min-height: 24px;
+        display: flex;
+        align-items: center;
+    }
+    
+    .setup-step::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        background: #e0e0e0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+    }
+    
+    .setup-step.active::before {
+        background: #1a237e;
+        color: white;
+        content: '🔄';
+    }
+    
+    .setup-step.completed::before {
+        background: #4caf50;
+        color: white;
+        content: '✓';
+    }
+    
+    .setup-step.failed::before {
+        background: #f44336;
+        color: white;
+        content: '✗';
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="registration-container">
+    <div class="registration-card">
+        <div class="form-header">
+            <h1>🔐 Government Employee Registration</h1>
+            <p>Create your account using official government email</p>
+        </div>
+        
+        <div class="info-box">
+            <strong>Allowed Email Domains:</strong>
+            <div style="margin-top: 0.5rem;">
+                <span class="email-domain">@mod.gov</span>
+                <span class="email-domain">@mof.gov</span>
+                <span class="email-domain">@nsa.gov</span>
+            </div>
+            <p style="margin-top: 0.5rem; margin-bottom: 0; color: #333;">
+                Your facility and department will be automatically detected from your email.
+            </p>
+        </div>
+        
+        <!-- Automated Security Setup Progress -->
+        <div id="automated-setup" class="automated-setup">
+            <h3 style="margin-top: 0; color: #1a237e;">🔄 Setting Up Automated Security</h3>
+            <div id="setup-steps">
+                <div class="setup-step" id="step1">Ready for registration</div>
+                <div class="setup-step" id="step2">Generating RSA keys...</div>
+                <div class="setup-step" id="step3">Creating certificate request...</div>
+                <div class="setup-step" id="step4">Setting up secure storage...</div>
+                <div class="setup-step" id="step5">Completing registration...</div>
+            </div>
+            <div id="setup-status" style="margin-top: 1rem; font-weight: bold; color: #1a237e;"></div>
+        </div>
+        
+        <div id="alert" class="alert"></div>
+        
+        <form id="registrationForm">
+            <div class="form-group">
+                <label for="full_name">Full Name *</label>
+                <input type="text" id="full_name" name="full_name" class="form-control" required
+                       placeholder="e.g., John Doe">
+            </div>
+            
+            <div class="form-group">
+                <label for="email">Official Email *</label>
+                <input type="email" id="email" name="email" class="form-control" required
+                       placeholder="e.g., john.doe@mod.gov">
+                <small style="color: #666; display: block; margin-top: 0.25rem;">
+                    Must be a valid government email address
+                </small>
+            </div>
+            
+            <div class="form-group">
+                <label for="username">Username *</label>
+                <input type="text" id="username" name="username" class="form-control" required
+                       placeholder="e.g., johndoe">
+                <small style="color: #666; display: block; margin-top: 0.25rem;">
+                    Choose a username for login (letters and numbers only)
+                </small>
+            </div>
+            
+            <div class="form-group">
+                <label for="password">Password *</label>
+                <input type="password" id="password" name="password" class="form-control" required
+                       placeholder="Minimum 8 characters">
+                <div class="password-requirements">
+                    <strong>Password Requirements:</strong>
+                    <ul style="margin: 0.5rem 0 0 1.5rem; padding: 0;">
+                        <li>At least 8 characters</li>
+                        <li>At least 1 uppercase letter</li>
+                        <li>At least 1 number</li>
+                        <li>At least 1 special character</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label for="confirm_password">Confirm Password *</label>
+                <input type="password" id="confirm_password" name="confirm_password" class="form-control" required
+                       placeholder="Re-enter your password">
+            </div>
+            
+            <div class="form-group">
+                <label for="employee_id">Employee ID (Optional)</label>
+                <input type="text" id="employee_id" name="employee_id" class="form-control"
+                       placeholder="e.g., MOD-2024-001">
+                <small style="color: #666; display: block; margin-top: 0.25rem;">
+                    Your official government employee ID (for verification)
+                </small>
+            </div>
+            
+            <div class="form-group">
+                <div style="background: #f8f9fa; padding: 1rem; border-radius: 5px;">
+                    <input type="checkbox" id="terms" name="terms" required>
+                    <label for="terms" style="display: inline; font-weight: normal;">
+                        I confirm that I am a government employee and agree to comply with 
+                        all security protocols. I understand that misuse of this system 
+                        may result in disciplinary action.
+                    </label>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <div style="background: #e8f5e9; padding: 1rem; border-radius: 5px; margin-bottom: 1rem;">
+                    <input type="checkbox" id="automated_security" name="automated_security" checked>
+                    <label for="automated_security" style="display: inline; font-weight: normal;">
+                        <strong>Enable Automated Security Setup</strong><br>
+                        <small style="color: #666;">
+                            Automatically generate RSA keys and certificates in your browser.
+                            This provides enhanced security and requires no manual steps.
+                        </small>
+                    </label>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <button type="submit" class="submit-btn" id="submitBtn">
+                    Create Account
+                </button>
+            </div>
+        </form>
+        
+        <div style="text-align: center; margin-top: 1.5rem;">
+            <p>Already have an account?</p>
+            <a href="/login" class="back-link">← Back to Login</a>
+        </div>
+    </div>
+</div>
+
+<!-- Load automated registration JavaScript -->
+<script src="{{ url_for('static', filename='js/zta-encryption.js') }}"></script>
+<script src="{{ url_for('static', filename='js/automated-registration.js') }}"></script>
+
+<script>
+// Simple progress indicator functions
+function updateStep(step, message, status = 'active') {
+    const element = document.getElementById(`step${step}`);
+    if (element) {
+        element.textContent = message;
+        element.className = 'setup-step ' + status;
+    }
+}
+
+function showAutomatedSetup(show) {
+    const setupDiv = document.getElementById('automated-setup');
+    if (setupDiv) {
+        setupDiv.style.display = show ? 'block' : 'none';
+    }
+}
+
+function updateStatus(message) {
+    const statusDiv = document.getElementById('setup-status');
+    if (statusDiv) {
+        statusDiv.textContent = message;
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('registrationForm');
+    const alertDiv = document.getElementById('alert');
+    const submitBtn = document.getElementById('submitBtn');
+    const automatedSecurityCheckbox = document.getElementById('automated_security');
+    
+    // Allowed government email domains
+    const allowedDomains = ['@mod.gov', '@mof.gov', '@nsa.gov'];
+    
+    // Validate government email
+    function validateEmail(email) {
+        return allowedDomains.some(domain => email.endsWith(domain));
+    }
+    
+    // Validate password strength
+    function validatePassword(password) {
+        const minLength = 8;
+        const hasUpperCase = /[A-Z]/.test(password);
+        const hasLowerCase = /[a-z]/.test(password);
+        const hasNumbers = /\d/.test(password);
+        const hasSpecialChar = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password);
+        
+        return password.length >= minLength && hasUpperCase && hasLowerCase && hasNumbers && hasSpecialChar;
+    }
+    
+    // Show alert message
+    function showAlert(message, type) {
+        alertDiv.textContent = message;
+        alertDiv.className = `alert alert-${type}`;
+        alertDiv.style.display = 'block';
+        
+        setTimeout(() => {
+            alertDiv.style.display = 'none';
+        }, 5000);
+    }
+    
+    // Auto-detect facility from email
+    function detectFacilityFromEmail(email) {
+        if (email.endsWith('@mod.gov')) return 'Ministry of Defence';
+        if (email.endsWith('@mof.gov')) return 'Ministry of Finance';
+        if (email.endsWith('@nsa.gov')) return 'National Security Agency';
+        return null;
+    }
+    
+    // Handle automated registration
+    async function handleAutomatedRegistration(formData) {
+        try {
+            showAutomatedSetup(true);
+            updateStep(1, 'Initializing security setup...', 'active');
+            
+            // Initialize automated setup
+            if (!window.automatedRegistration) {
+                window.automatedRegistration = new AutomatedRegistration();
+                await window.automatedRegistration.init();
+            }
+            
+            updateStep(2, 'Generating RSA key pair...', 'active');
+            updateStatus('Generating secure RSA keys in your browser...');
+            
+            // Use automated registration
+            const result = await window.automatedRegistration.handleRegistration(formData);
+            
+            if (result.success) {
+                updateStep(5, 'Registration complete!', 'completed');
+                updateStatus('✅ Security setup complete!');
+                
+                return {
+                    success: true,
+                    user_id: result.user_id,
+                    has_certificate: result.has_certificate,
+                    message: 'Automated registration successful'
+                };
+            } else {
+                updateStep(5, 'Registration failed', 'failed');
+                updateStatus('❌ ' + result.error);
+                throw new Error(result.error);
+            }
+            
+        } catch (error) {
+            console.error('Automated registration failed:', error);
+            throw error;
+        }
+    }
+    
+    // Handle regular registration
+    async function handleRegularRegistration(formData) {
+        try {
+            console.log('Sending regular registration data:', formData);
+            
+            // Send registration request
+            const response = await fetch('/api/register/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(formData)
+            });
+            
+            console.log('Response status:', response.status);
+            const data = await response.json();
+            console.log('Response data:', data);
+            
+            if (response.ok) {
+                return {
+                    success: true,
+                    data: data
+                };
+            } else {
+                throw new Error(data.error || 'Registration failed');
+            }
+            
+        } catch (error) {
+            console.error('Registration error:', error);
+            throw error;
+        }
+    }
+    
+    // Handle form submission
+    form.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        // Get form values
+        const email = document.getElementById('email').value;
+        const password = document.getElementById('password').value;
+        const confirmPassword = document.getElementById('confirm_password').value;
+        const username = document.getElementById('username').value;
+        const useAutomated = automatedSecurityCheckbox.checked;
+        
+        // Validate email domain
+        if (!validateEmail(email)) {
+            showAlert(`Email must be from a government domain. Allowed: ${allowedDomains.join(', ')}`, 'error');
+            return;
+        }
+        
+        // Validate password
+        if (!validatePassword(password)) {
+            showAlert('Password must be at least 8 characters with uppercase, lowercase, number, and special character.', 'error');
+            return;
+        }
+        
+        // Confirm password
+        if (password !== confirmPassword) {
+            showAlert('Passwords do not match!', 'error');
+            return;
+        }
+        
+        // Validate username (letters and numbers only)
+        if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+            showAlert('Username can only contain letters, numbers, and underscores.', 'error');
+            return;
+        }
+        
+        // Disable submit button
+        submitBtn.disabled = true;
+        submitBtn.textContent = useAutomated ? 'Setting Up Security...' : 'Creating Account...';
+        
+        try {
+            // Get form data
+            const formData = {
+                full_name: document.getElementById('full_name').value,
+                email: email,
+                username: username,
+                password: password,
+                employee_id: document.getElementById('employee_id').value || null
+            };
+            
+            let result;
+            
+            if (useAutomated) {
+                // Use automated registration with RSA keys
+                result = await handleAutomatedRegistration(formData);
+            } else {
+                // Use regular registration
+                result = await handleRegularRegistration(formData);
+            }
+            
+            if (result.success) {
+                showAlert('✅ Account created successfully! Redirecting to login...', 'success');
+                
+                // Show success message and redirect
+                setTimeout(() => {
+                    alert(`
+✅ Account Created Successfully!
+
+Welcome to the Government Document System!
+
+You can now login with:
+• Username: ${username}
+• Email: ${email}
+
+${useAutomated ? '✓ RSA keys generated automatically\n✓ Certificate stored securely in browser' : 'Note: You may need to set up security certificates separately'}
+
+You will be redirected to the login page.
+                    `);
+                    window.location.href = '/';
+                }, 1500);
+                
+            } else {
+                showAlert(`Error: ${result.error || 'Registration failed'}`, 'error');
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Create Account';
+                showAutomatedSetup(false);
+            }
+            
+        } catch (error) {
+            console.error('Registration error:', error);
+            showAlert(`Registration failed: ${error.message}`, 'error');
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Create Account';
+            showAutomatedSetup(false);
+        }
+    });
+    
+    // Auto-detect facility when email changes
+    document.getElementById('email').addEventListener('blur', function() {
+        const email = this.value;
+        if (validateEmail(email)) {
+            const facility = detectFacilityFromEmail(email);
+            if (facility) {
+                showAlert(`Detected facility: ${facility}`, 'success');
+            }
+        }
+    });
+    
+    // Password strength indicator
+    document.getElementById('password').addEventListener('input', function() {
+        const password = this.value;
+        const requirements = document.querySelector('.password-requirements ul');
+        
+        if (requirements) {
+            const items = requirements.querySelectorAll('li');
+            
+            // Check each requirement
+            items[0].style.color = password.length >= 8 ? '#4caf50' : '#666';
+            items[1].style.color = /[A-Z]/.test(password) ? '#4caf50' : '#666';
+            items[2].style.color = /\d/.test(password) ? '#4caf50' : '#666';
+            items[3].style.color = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password) ? '#4caf50' : '#666';
+        }
+    });
+});
+</script>
+
+{% endblock %}

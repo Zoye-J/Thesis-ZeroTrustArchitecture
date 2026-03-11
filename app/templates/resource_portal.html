@@ -1,0 +1,647 @@
+{% extends "base.html" %}
+
+{% block title %}Resource Portal - Government ZTA System{% endblock %}
+
+{% block extra_css %}
+<style>
+    .portal-header {
+        background: linear-gradient(135deg, #1a237e 0%, #283593 100%);
+        color: white;
+        padding: 2rem;
+        border-radius: 10px;
+        margin-bottom: 2rem;
+    }
+    
+    .portal-header h1 {
+        margin: 0 0 1rem 0;
+        font-size: 2rem;
+    }
+    
+    .department-badge {
+        display: inline-block;
+        background: rgba(255,255,255,0.2);
+        padding: 0.25rem 1rem;
+        border-radius: 20px;
+        font-weight: bold;
+        margin-right: 0.5rem;
+    }
+    
+    .filters-section {
+        background: white;
+        padding: 1.5rem;
+        border-radius: 10px;
+        margin-bottom: 2rem;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .filter-controls {
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+    
+    .filter-select {
+        padding: 0.5rem 1rem;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        min-width: 200px;
+    }
+    
+    .search-box {
+        flex-grow: 1;
+        padding: 0.5rem 1rem;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+    }
+    
+    .filter-button {
+        background: #1a237e;
+        color: white;
+        border: none;
+        padding: 0.5rem 1.5rem;
+        border-radius: 5px;
+        cursor: pointer;
+    }
+    
+    .resource-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+        gap: 1.5rem;
+    }
+    
+    .resource-card {
+        background: white;
+        border-radius: 10px;
+        padding: 1.5rem;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        border: 1px solid #e0e0e0;
+    }
+    
+    .resource-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+    }
+    
+    .resource-title {
+        font-size: 1.2rem;
+        font-weight: bold;
+        color: #1a237e;
+        margin: 0;
+    }
+    
+    .classification-badge {
+        padding: 0.25rem 0.75rem;
+        border-radius: 12px;
+        font-size: 0.8rem;
+        font-weight: bold;
+    }
+    
+    .classification-public { background: #4caf50; color: white; }
+    .classification-department { background: #2196f3; color: white; }
+    .classification-top-secret { background: #9c27b0; color: white; }
+    
+    .resource-info {
+        margin-bottom: 1rem;
+        color: #666;
+    }
+    
+    .info-row {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 0.5rem;
+    }
+    
+    .info-label {
+        font-weight: 600;
+        color: #333;
+    }
+    
+    .action-button {
+        background: #1a237e;
+        color: white;
+        border: none;
+        padding: 0.5rem 1rem;
+        border-radius: 5px;
+        cursor: pointer;
+        width: 100%;
+        margin-top: 1rem;
+    }
+    
+    .action-button:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+    }
+    
+    .access-pending {
+        background: #ff9800;
+        color: white;
+    }
+    
+    .access-denied {
+        background: #f44336;
+        color: white;
+    }
+    
+    .loading {
+        text-align: center;
+        padding: 3rem;
+        color: #666;
+    }
+    
+    .access-warning {
+        background: #fff3cd;
+        border: 1px solid #ffeaa7;
+        color: #856404;
+        padding: 1rem;
+        border-radius: 5px;
+        margin-bottom: 1rem;
+    }
+    
+    .top-secret-warning {
+        background: #f8d7da;
+        border: 1px solid #f5c6cb;
+        color: #721c24;
+        padding: 1rem;
+        border-radius: 5px;
+        margin-top: 1rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="resourcePortal">
+    <div class="loading">Loading Resource Portal...</div>
+</div>
+
+<script>
+// Global variables
+let currentUser = null;
+let resources = [];
+let filters = {
+    classification: 'all',
+    search: ''
+};
+
+// Load resource portal
+async function loadResourcePortal() {
+    try {
+        const token = localStorage.getItem('access_token');
+        
+        if (!token) {
+            window.location.href = '/';
+            return;
+        }
+        
+        // Get user info
+        const userResponse = await fetch('/api/auth/me', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (userResponse.status === 401) {
+            localStorage.removeItem('access_token');
+            window.location.href = '/';
+            return;
+        }
+        
+        if (!userResponse.ok) {
+            throw new Error('Failed to get user info');
+        }
+        
+        const userData = await userResponse.json();
+        
+        if (!userData.authenticated) {
+            window.location.href = '/';
+            return;
+        }
+        
+        currentUser = userData.user;
+        
+        // Load resources
+        await loadResources();
+        
+        // Render portal
+        renderPortal();
+        
+    } catch (error) {
+        console.error('Resource portal error:', error);
+        document.getElementById('resourcePortal').innerHTML = `
+            <div style="background: #f8d7da; color: #721c24; padding: 2rem; border-radius: 5px;">
+                <h3>Error Loading Resource Portal</h3>
+                <p>${error.message}</p>
+                <button onclick="window.location.href='/dashboard'">Back to Dashboard</button>
+            </div>
+        `;
+    }
+}
+
+async function loadResources() {
+    try {
+        const token = localStorage.getItem('access_token');
+        const response = await fetch('/api/resources', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to load resources');
+        }
+        
+        const data = await response.json();
+        
+        // Check if response is encrypted
+        if (data.encrypted_payload) {
+            // We need to decrypt using the ZTA encryption library
+            if (window.ztaEncryptor && window.ztaEncryptor.initialized) {
+                try {
+                    const decrypted = await window.ztaEncryptor.decryptFromAgent(data.encrypted_payload);
+                    console.log('Decrypted resources:', decrypted);
+                    
+                    // Handle the decrypted response
+                    if (decrypted.allowed && decrypted.api_response) {
+                        resources = decrypted.api_response.data || [];
+                        console.log(`✅ Loaded ${resources.length} resources via encrypted flow`);
+                    } else {
+                        console.error('Access denied by policy:', decrypted);
+                        resources = [];
+                    }
+                } catch (decryptError) {
+                    console.error('Decryption failed:', decryptError);
+                    resources = [];
+                }
+            } else {
+                console.error('Encryption not initialized');
+                resources = [];
+            }
+        } else {
+            // Direct response (for now)
+            resources = data.resources || data || [];
+            console.log(`✅ Loaded ${resources.length} resources`);
+        }
+        
+    } catch (error) {
+        console.error('Error loading resources:', error);
+        resources = [];
+    }
+}
+
+
+// Generate classification filter options based on user
+function getClassificationOptions() {
+    const options = [
+        { value: 'all', label: 'All Classifications' },
+        { value: 'PUBLIC', label: 'Public' },
+        { value: 'DEPARTMENT', label: 'Department' }
+    ];
+    
+    // Check clearance level in a case-insensitive way
+    const userClearance = currentUser.clearance_level.toUpperCase();
+    
+    // Only MOD users with SECRET or TOP_SECRET clearance see Top Secret filter
+    if (currentUser.department === 'MOD' && 
+        (userClearance === 'SECRET' || userClearance === 'TOP_SECRET')) {
+        options.push({ value: 'TOP_SECRET', label: 'Top Secret' });
+    }
+    
+    return options;
+}
+
+// Render portal interface
+function renderPortal() {
+    const filteredResources = filterResources();
+    const classificationOptions = getClassificationOptions();
+    
+    document.getElementById('resourcePortal').innerHTML = `
+        <div class="portal-header">
+            <h1>Government Resource Portal</h1>
+            <div>
+                <span class="department-badge">${currentUser.department}</span>
+                <span>Clearance: ${currentUser.clearance_level}</span>
+            </div>
+            <p style="opacity: 0.9; margin-top: 0.5rem;">
+                Access resources based on your department and clearance level
+            </p>
+        </div>
+        
+        ${currentUser.department === 'MOD' && 
+    (currentUser.clearance_level.toUpperCase() === 'SECRET' || 
+     currentUser.clearance_level.toUpperCase() === 'TOP_SECRET') ? `
+        <div class="top-secret-warning">
+            ⚠️ <strong>TOP SECRET ACCESS NOTICE:</strong> Top Secret resources are only accessible during business hours (8:00 AM - 4:00 PM)
+            <div style="margin-top: 0.5rem; font-size: 0.9rem;">
+                Current time: ${new Date().toLocaleTimeString()} | 
+                Business hours: 8:00 AM - 4:00 PM
+            </div>
+        </div>
+        ` : ''}
+        
+        <div class="filters-section">
+            <h3 style="margin-top: 0;">Filter Resources</h3>
+            <div class="filter-controls">
+                <select class="filter-select" onchange="updateFilter('classification', this.value)">
+                    ${classificationOptions.map(opt => 
+                        `<option value="${opt.value}" ${filters.classification === opt.value ? 'selected' : ''}>
+                            ${opt.label}
+                        </option>`
+                    ).join('')}
+                </select>
+                
+                <input type="text" 
+                       class="search-box" 
+                       placeholder="Search by title or description..." 
+                       oninput="updateFilter('search', this.value)"
+                       value="${filters.search}">
+                
+                <button class="filter-button" onclick="applyFilters()">Apply Filters</button>
+            </div>
+            
+            <div style="margin-top: 1rem; font-size: 0.9rem; color: #666;">
+                <strong>Filter Legend:</strong>
+                <span class="classification-badge classification-public" style="margin-left: 0.5rem;">PUBLIC</span> - All .gov users
+                <span class="classification-badge classification-department" style="margin-left: 0.5rem;">DEPARTMENT</span> - ${currentUser.department} only
+                ${currentUser.department === 'MOD' &&  
+ (currentUser.clearance_level.toUpperCase() === 'SECRET' || 
+  currentUser.clearance_level.toUpperCase() === 'TOP_SECRET') ? 
+                    `<span class="classification-badge classification-top-secret" style="margin-left: 0.5rem;">TOP SECRET</span> - MOD only (8AM-4PM)` : 
+                    ''}
+            </div>
+        </div>
+        
+        <div class="resource-stats" style="margin-bottom: 1rem; padding: 1rem; background: #f5f5f5; border-radius: 5px;">
+            <strong>${filteredResources.length}</strong> resources found
+            ${filters.classification !== 'all' ? 
+                `• Showing: <strong>${classificationOptions.find(o => o.value === filters.classification).label}</strong>` : 
+                ''}
+            ${filters.search ? `• Search: <strong>"${filters.search}"</strong>` : ''}
+        </div>
+        
+        ${filteredResources.length === 0 ? `
+        <div style="text-align: center; padding: 3rem; background: white; border-radius: 10px; border: 2px dashed #ddd;">
+            <h3 style="color: #666;">No resources found</h3>
+            <p>Try adjusting your filters or check your access permissions</p>
+            <button onclick="resetFilters()" style="background: #1a237e; color: white; border: none; padding: 0.5rem 1rem; border-radius: 5px; cursor: pointer; margin-top: 1rem;">
+                Reset Filters
+            </button>
+        </div>
+        ` : `
+        <div class="resource-grid">
+            ${filteredResources.map(resource => renderResourceCard(resource)).join('')}
+        </div>
+        `}
+    `;
+}
+
+function filterResources() {
+    console.log('Filtering with:', filters);
+    console.log('Total resources:', resources.length);
+    
+    const filtered = resources.filter(resource => {
+        // Classification filter - use tier instead of classification
+        if (filters.classification !== 'all' && resource.tier !== filters.classification) {
+            console.log(`Skipping ${resource.name} - tier ${resource.tier} doesn't match ${filters.classification}`);
+            return false;
+        }
+        
+        // Search filter - search by name or description
+        if (filters.search) {
+            const searchLower = filters.search.toLowerCase();
+            const resourceName = resource.name || resource.title || '';
+            const resourceDesc = resource.description || '';
+            
+            const matches = resourceName.toLowerCase().includes(searchLower) || 
+                   resourceDesc.toLowerCase().includes(searchLower);
+            
+            if (!matches) {
+                console.log(`Skipping ${resource.name} - doesn't match search "${filters.search}"`);
+            }
+            return matches;
+        }
+        
+        return true;
+    });
+    
+    console.log(`Filtered to ${filtered.length} resources`);
+    return filtered;
+}
+
+function renderResourceCard(resource) {
+    // Use resource.tier instead of resource.classification
+    let classificationClass = 'classification-public';
+    let classificationText = 'PUBLIC';
+    
+    if (resource.tier === 'DEPARTMENT') {
+        classificationClass = 'classification-department';
+        classificationText = 'DEPARTMENT';
+    } else if (resource.tier === 'TOP_SECRET') {
+        classificationClass = 'classification-top-secret';
+        classificationText = 'TOP SECRET';
+    }
+    
+    // Generate a description if not present
+    const description = resource.description || `${resource.name} - ${classificationText} government document`;
+    
+    // Check if user can access this resource
+    const canAccess = checkAccessPermission(resource);
+    const currentHour = new Date().getHours();
+    const isBusinessHours = currentHour >= 8 && currentHour < 16;
+    
+    // Determine button text and state
+    let buttonText = '📄 View Resource';
+    let buttonDisabled = false;
+    let buttonClass = '';
+    
+    if (!canAccess) {
+        buttonText = '🚫 Access Denied';
+        buttonDisabled = true;
+        buttonClass = 'access-denied';
+    } else if (resource.tier === 'TOP_SECRET' && !isBusinessHours) {
+        buttonText = '⏰ Time Restricted';
+        buttonDisabled = true;
+        buttonClass = 'access-pending';
+    }
+    
+    return `
+        <div class="resource-card">
+            <div class="resource-header">
+                <h3 class="resource-title">${resource.name || resource.title}</h3>
+                <span class="classification-badge ${classificationClass}">
+                    ${classificationText}
+                </span>
+            </div>
+            
+            <div class="resource-info">
+                <p>${description}</p>
+                
+                <div class="info-row">
+                    <span class="info-label">Department:</span>
+                    <span style="font-weight: bold; color: ${resource.department === currentUser.department ? '#2196f3' : '#666'}">
+                        ${resource.department}
+                        ${resource.department === currentUser.department ? ' (Your Dept)' : ''}
+                    </span>
+                </div>
+                
+                <div class="info-row">
+                    <span class="info-label">Classification:</span>
+                    <span>${resource.tier}</span>
+                </div>
+                
+                ${resource.restricted ? `
+                <div class="info-row">
+                    <span class="info-label">Status:</span>
+                    <span style="color: #f44336; font-weight: bold;">⏰ Time Restricted</span>
+                </div>
+                ` : ''}
+            </div>
+            
+            <button class="action-button ${buttonClass}" 
+                    onclick="requestResourceAccess(${resource.id})"
+                    ${buttonDisabled ? 'disabled' : ''}>
+                ${buttonText}
+            </button>
+            
+            ${!canAccess || (resource.tier === 'TOP_SECRET' && !isBusinessHours) ? `
+            <p style="color: #666; font-size: 0.9rem; margin-top: 0.5rem; padding: 0.5rem; background: #f9f9f9; border-radius: 3px;">
+                ${getAccessDeniedReason(resource)}
+            </p>
+            ` : ''}
+        </div>
+    `;
+}
+
+// Check if user can access resource
+function checkAccessPermission(resource) {
+    const userClearance = currentUser.clearance_level.toUpperCase();
+    
+    // PUBLIC: Everyone can access
+    if (resource.tier === 'PUBLIC') {
+        return true;
+    }
+    
+    // DEPARTMENT: Only same department
+    if (resource.tier === 'DEPARTMENT') {
+        return resource.department === currentUser.department;
+    }
+    
+    // TOP_SECRET: Check multiple conditions
+    if (resource.tier === 'TOP_SECRET') {
+        // 1. Must be MOD department
+        if (resource.department !== 'MOD') {
+            return false;
+        }
+        
+        // 2. User must be MOD department
+        if (currentUser.department !== 'MOD') {
+            return false;
+        }
+        
+        // 3. Must have SECRET or TOP_SECRET clearance (case-insensitive)
+        if (userClearance !== 'SECRET' && userClearance !== 'TOP_SECRET') {
+            return false;
+        }
+        
+        // 4. Check time restriction (8 AM - 4 PM)
+        const currentHour = new Date().getHours();
+        if (currentHour < 8 || currentHour >= 16) {
+            return false;
+        }
+        
+        return true;
+    }
+    
+    return false;
+}
+
+
+// Get reason for access denial
+function getAccessDeniedReason(resource) {
+    const userClearance = currentUser.clearance_level.toUpperCase();
+    
+    if (resource.tier === 'DEPARTMENT') {  // ← Change from classification to tier
+        if (resource.department !== currentUser.department) {
+            return `🔒 Department restricted: ${resource.department} personnel only`;
+        }
+    }
+    
+    if (resource.tier === 'TOP_SECRET') {  // ← Change from classification to tier
+        if (resource.department !== 'MOD') {
+            return '🔒 TOP SECRET resources are MOD department only';
+        }
+        
+        if (currentUser.department !== 'MOD') {
+            return '🔒 TOP SECRET access requires MOD department assignment';
+        }
+        
+        if (userClearance !== 'TOP_SECRET') {
+            return `🔒 TOP SECRET clearance required (Your clearance: ${currentUser.clearance_level})`;
+        }
+        
+        const currentHour = new Date().getHours();
+        if (currentHour < 8 || currentHour >= 16) {
+            return `🕐 Access restricted to business hours (8:00 AM - 4:00 PM). Current time: ${new Date().toLocaleTimeString()}`;
+        }
+    }
+    
+    return 'Access denied by security policy';
+}
+
+// Update filter values
+function updateFilter(type, value) {
+     filters[type] = value;
+    
+    renderPortal();
+}
+// Apply filters and re-render
+function applyFilters() {
+    renderPortal();
+}
+
+// Reset all filters
+function resetFilters() {
+    filters = {
+        classification: 'all',
+        search: ''
+    };
+    renderPortal();
+}
+
+// Request resource access
+async function requestResourceAccess(resourceId) {
+    try {
+        const token = localStorage.getItem('access_token');
+        const response = await fetch(`/api/resources/${resourceId}/access`, {
+            method: 'POST',
+            headers: { 
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            alert(`Access denied: ${error.message}`);
+            return;
+        }
+        
+        const result = await response.json();
+        
+        if (result.requires_approval) {
+            alert('Access request submitted for JIT approval');
+        } else if (result.access_granted) {
+            alert('✅ Access granted! Opening resource...');
+            // Open the view endpoint
+            window.open(`/api/resources/${resourceId}/view`, '_blank');
+        } else {
+            alert('Access request processed');
+        }
+        
+    } catch (error) {
+        console.error('Access request error:', error);
+        alert('Error requesting access');
+    }
+}
+
+// Initialize portal
+document.addEventListener('DOMContentLoaded', loadResourcePortal);
+</script>
+{% endblock %}
