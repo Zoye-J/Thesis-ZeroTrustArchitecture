@@ -155,21 +155,17 @@ def gateway_proxy(subpath):
         # Use REAL service communicator to process request
         result = process_encrypted_request(request, user_claims)
 
-        # Check if this is an encrypted response that needs processing
-        if isinstance(result, tuple) and len(result) == 2:
+         # Check if this is an encrypted response
+        if isinstance(result, tuple):
             response_data, status_code = result
-
-            # If it's a Flask Response object with encrypted_payload, return as-is
-            if hasattr(response_data, "json"):
+            if hasattr(response_data, 'json'):
                 try:
                     json_data = response_data.get_json()
-                    if json_data and "encrypted_payload" in json_data:
-                        # This is an encrypted response - return it directly to client
-                        # Client's JavaScript will decrypt it
+                    # If it's encrypted, return as-is
+                    if json_data and 'encrypted_response' in json_data:
                         return response_data, status_code
                 except:
                     pass
-
             return result
 
         return result
@@ -191,8 +187,7 @@ def gateway_proxy(subpath):
 @require_authentication
 def view_resource_page(resource_id):
     """
-    View resource page - uses OPA Agent encrypted flow
-    This is the HTML page users see
+    View resource page - displays the resource after encryption flow
     """
     try:
         # Get current user from g (set by require_authentication middleware)
@@ -216,7 +211,7 @@ def view_resource_page(resource_id):
         event_logger.log_event(
             event_type=EventType.REQUEST_RECEIVED,
             source_component="gateway",
-            action=f"Resource view requested - ID: {resource_id}",
+            action=f"Resource view page requested - ID: {resource_id}",
             user_id=user.id,
             username=user.username,
             details={
@@ -228,7 +223,7 @@ def view_resource_page(resource_id):
             severity=Severity.INFO,
         )
 
-        # Render a loader page that will fetch via OPA Agent
+        # Render loader page (will use stored encrypted response)
         return render_template(
             "view_resource_loader.html",
             resource_id=resource_id,

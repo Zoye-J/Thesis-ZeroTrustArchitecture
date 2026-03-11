@@ -14,6 +14,8 @@ import logging
 from app.logs.zta_event_logger import event_logger, EventType
 from datetime import datetime
 
+from app.models import user
+
 # Apply SSL fix BEFORE any imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 try:
@@ -175,11 +177,9 @@ class EncryptedServiceCommunicator:
 
             # Check if OPA Agent is available
             if not self.opa_agent_client:
-                logger.warning(
-                    f"[{request_id}] OPA Agent not available, using direct API"
-                )
-                return self._handle_direct_resource_call(
-                    flask_request, user_claims, request_id
+                logger.error(f"[{request_id}] OPA Agent not available")
+                return self._create_error_response(
+                    503, "Security service unavailable - access denied", request_id
                 )
 
             # Step 1: Encrypt and send to OPA Agent
@@ -191,13 +191,26 @@ class EncryptedServiceCommunicator:
                 )
             except Exception as e:
                 logger.error(f"[{request_id}] Encryption failed: {e}")
-                # Use direct API as fallback
-                return self._handle_direct_resource_call(
-                    flask_request, user_claims, request_id
+                return self._create_error_response(
+                    500, f"Encryption failed - access denied", request_id
                 )
 
             # Step 2: Send to OPA Agent
             logger.info(f"[{request_id}] 📡 Sending to OPA Agent")
+            from app.models.user import User
+
+            user = User.query.get(user_claims.get("sub"))
+            if not user:
+                return self._create_error_response(404, "User not found", request_id)
+
+            user_public_key = (
+                user.public_key_pem
+            )  # Use the property, not direct attribute
+            if not user_public_key:
+                return self._create_error_response(
+                    400, "User public key not found", request_id
+                )
+
             agent_response = self.opa_agent_client.send_to_agent(
                 encrypted_request, user_public_key, request_id
             )
@@ -205,58 +218,62 @@ class EncryptedServiceCommunicator:
             if not agent_response:
                 logger.error(f"[{request_id}] ❌ OPA Agent did not respond")
                 return self._create_error_response(
-                    503, "OPA Agent service unavailable", request_id
+                    503, "Security service unavailable - access denied", request_id
                 )
 
-            # Step 3: Check if response is encrypted
+            # Check if access denied
+            if agent_response.get("access_denied"):
+                return self._create_error_response(
+                    403,
+                    agent_response.get("reason", "Policy denied access"),
+                    request_id,
+                )
+
+            # Get encrypted response
             encrypted_response = agent_response.get("encrypted_response")
-            if encrypted_response:
-                # This is an encrypted response from OPA Agent
-                logger.info(
-                    f"[{request_id}] ✅ Received encrypted response from OPA Agent"
+            if not encrypted_response:
+                logger.error(f"[{request_id}] ❌ No encrypted response from OPA Agent")
+                return self._create_error_response(
+                    500, "Invalid response from security service", request_id
                 )
 
-                # Log successful encrypted flow
-                event_logger.log_event(
-                    event_type=EventType.RESPONSE_ENCRYPTED,
-                    source_component="service_communicator",
-                    action="Encrypted response received from OPA Agent",
-                    user_id=user_claims.get("sub"),
-                    username=user_claims.get("username"),
-                    details={
-                        "request_id": request_id,
+            # Log successful encrypted flow
+            event_logger.log_event(
+                event_type=EventType.RESPONSE_ENCRYPTED,
+                source_component="service_communicator",
+                action="Encrypted response received from OPA Agent",
+                user_id=user_claims.get("sub"),
+                username=user_claims.get("username"),
+                details={
+                    "request_id": request_id,
+                    "resource_id": resource_id,
+                    "encryption": "RSA-OAEP-SHA256",
+                    "flow_complete": True,
+                },
+                trace_id=request_id,
+            )
+
+            # Return encrypted response - NO FALLBACKS
+            return (
+                jsonify(
+                    {
+                        "encrypted_response": encrypted_response,
                         "resource_id": resource_id,
-                        "encryption": "RSA-OAEP-SHA256",
-                        "flow_complete": True,
-                    },
-                    trace_id=request_id,
-                )
-
-                return (
-                    jsonify(
-                        {
-                            "status": "encrypted",
-                            "encrypted_payload": encrypted_response,
-                            "resource_id": resource_id,
-                            "encryption_info": {
-                                "algorithm": "RSA-OAEP-SHA256",
-                                "key_size": 2048,
-                                "request_id": request_id,
-                            },
-                            "zta_context": {
-                                "flow": "User → Gateway → OPA Agent → OPA Server → API Server → OPA Agent → Gateway",
-                                "encryption_used": True,
-                                "opa_agent_used": True,
-                                "trace_id": request_id,
-                            },
-                        }
-                    ),
-                    200,
-                )
-            else:
-                # Direct response (for testing or fallback)
-                logger.info(f"[{request_id}] 📦 Direct response from OPA Agent")
-                return jsonify(agent_response), 200
+                        "encryption_info": {
+                            "algorithm": "RSA-OAEP-SHA256",
+                            "key_size": 2048,
+                            "request_id": request_id,
+                        },
+                        "zta_context": {
+                            "flow": "User → Gateway → OPA Agent → OPA Server → API Server → OPA Agent → Gateway",
+                            "encryption_used": True,
+                            "opa_agent_used": True,
+                            "trace_id": request_id,
+                        },
+                    }
+                ),
+                200,
+            )
 
         except Exception as e:
             logger.error(f"[{request_id}] Resource request error: {e}")
@@ -433,24 +450,29 @@ class EncryptedServiceCommunicator:
         return self._handle_direct_resource_call(flask_request, user_claims, request_id)
 
     def _get_user_public_key(self, user_id):
-        """Get user's public key"""
+        """Get user's public key using the User model property"""
         try:
             from app.models.user import User
 
             user = User.query.get(user_id)
-            if user and user.public_key:
-                return user.public_key
+            if not user:
+                logger.error(f"User {user_id} not found")
+                return None
 
-            # Try from cert manager
-            try:
-                from app.mTLS.cert_manager import cert_manager
+            # Use the public_key_pem property which handles the UserKey relationship
+            public_key = user.public_key_pem
 
-                return cert_manager.get_user_public_key(user_id)
-            except:
-                pass
+            if public_key:
+                logger.debug(f"✅ Got public key for user {user_id}")
+                return public_key
 
-            return None
-        except:
+            # If no key, try to generate one
+            logger.info(f"No public key for user {user_id}, generating...")
+            public_key = user.generate_keys()
+            return public_key
+
+        except Exception as e:
+            logger.error(f"Error getting user public key: {e}")
             return None
 
     def _create_error_response(self, status_code, message, request_id):

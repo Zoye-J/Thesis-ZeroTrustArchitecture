@@ -145,15 +145,27 @@ class ZTAEncryption {
         }
         
         try {
-            // Check if it's hybrid encrypted
-            if (typeof encryptedData === 'string' && encryptedData.startsWith('{')) {
-                const parsed = JSON.parse(encryptedData);
-                if (parsed.algorithm === "RSA-AES-HYBRID") {
-                    return await this.hybridDecrypt(parsed);
+            // Check if it's hybrid encrypted (from backend)
+            if (typeof encryptedData === 'string') {
+                // Try to parse as JSON to check for hybrid format
+                try {
+                    const parsed = JSON.parse(encryptedData);
+                    // Backend hybrid format has 'type' field
+                    if (parsed.type === 'hybrid') {
+                        console.log('🔐 Detected backend hybrid encryption');
+                        return await this.hybridDecryptBackend(parsed);
+                    }
+                    // Frontend hybrid format has 'algorithm' field
+                    if (parsed.algorithm === "RSA-AES-HYBRID") {
+                        return await this.hybridDecrypt(parsed);
+                    }
+                } catch {
+                    // Not JSON, continue with regular RSA
                 }
             }
             
             // Regular RSA decryption
+            console.log('🔐 Using direct RSA decryption');
             const privateKey = await this.importPrivateKey(this.userPrivateKey);
             const encrypted = this.base64ToArrayBuffer(encryptedData);
             
@@ -170,6 +182,41 @@ class ZTAEncryption {
             console.error('Decryption failed:', error);
             throw error;
         }
+    }
+
+    // Add new method for backend hybrid format
+    async hybridDecryptBackend(encryptedPackage) {
+        const privateKey = await this.importPrivateKey(this.userPrivateKey);
+        
+        // Decrypt AES key with RSA
+        const encryptedKey = this.base64ToArrayBuffer(encryptedPackage.encrypted_key);
+        const exportedAesKey = await window.crypto.subtle.decrypt(
+            { name: "RSA-OAEP" },
+            privateKey,
+            encryptedKey
+        );
+        
+        // Import AES key
+        const aesKey = await window.crypto.subtle.importKey(
+            "raw",
+            exportedAesKey,
+            { name: "AES-GCM", length: 256 },
+            true,
+            ["decrypt"]
+        );
+        
+        // Decrypt data with AES
+        const iv = this.base64ToArrayBuffer(encryptedPackage.iv);
+        const encryptedData = this.base64ToArrayBuffer(encryptedPackage.encrypted_data);
+        
+        const decryptedData = await window.crypto.subtle.decrypt(
+            { name: "AES-GCM", iv: iv },
+            aesKey,
+            encryptedData
+        );
+        
+        const decoder = new TextDecoder();
+        return JSON.parse(decoder.decode(decryptedData));
     }
     
     async hybridDecrypt(encryptedPackage) {

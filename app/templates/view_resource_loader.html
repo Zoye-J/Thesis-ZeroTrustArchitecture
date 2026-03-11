@@ -180,6 +180,7 @@ function updateStep(stepNumber, status, message = '') {
 }
 
 // ========== OPA AGENT FLOW ==========
+// ========== OPA AGENT FLOW ==========
 async function fetchResourceThroughOPA() {
     try {
         updateStep(1, 'active', 'Authenticating...');
@@ -193,42 +194,35 @@ async function fetchResourceThroughOPA() {
         updateStep(1, 'completed', 'JWT verified');
         updateStep(2, 'active', 'Encrypting request...');
         
-        // Step 2: Fetch through OPA Agent encrypted flow
-        const response = await fetch(`/api/resources/${resourceId}`, {
+        // Step 2: Send request through encrypted flow - USE THE CORRECT ENDPOINT
+        const response = await fetch(`/api/resources/${resourceId}/access`, {
+            method: 'POST',  // Must be POST
             headers: { 
                 'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
                 'X-Trace-ID': traceId
-            }
+            },
+            body: JSON.stringify({})  // Empty body is fine
         });
         
         if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`HTTP ${response.status}: ${errorText}`);
+            const errorData = await response.json();
+            throw new Error(errorData.error || `HTTP ${response.status}`);
         }
         
         const data = await response.json();
         updateStep(2, 'completed', 'Request encrypted');
         
-        // Step 3: Check if response is encrypted
-        if (data.encrypted_payload) {
+        // Step 3: Check if we got encrypted response
+        if (data.encrypted_response) {
             updateStep(3, 'active', 'Policy evaluation in progress...');
+            updateStep(4, 'active', 'Fetching resource...');
             
-            // Small delay to show policy evaluation
-            setTimeout(async () => {
-                updateStep(3, 'completed', 'Policy check passed');
-                updateStep(4, 'active', 'Fetching resource...');
-                
-                // Decrypt the response
-                await decryptAndDisplay(data.encrypted_payload);
-            }, 800);
+            // Decrypt the response
+            await decryptAndDisplay(data.encrypted_response);
             
         } else {
-            // Direct response (for testing or fallback)
-            updateStep(3, 'completed', 'Policy check passed');
-            updateStep(4, 'completed', 'Resource fetched');
-            updateStep(5, 'completed', 'Response ready');
-            updateStep(6, 'completed', 'Content displayed');
-            displayResource(data);
+            throw new Error('Expected encrypted response but got plaintext');
         }
         
     } catch (error) {
@@ -237,19 +231,15 @@ async function fetchResourceThroughOPA() {
         showError(`Failed to load resource: ${error.message}`);
     }
 }
-
 // ========== DECRYPTION ==========
 
-
-
-
+// ========== DECRYPTION ==========
 async function decryptAndDisplay(encryptedPayload) {
     try {
         updateStep(5, 'active', 'Decrypting response...');
         
         // Check if encryption is available
         if (!window.ztaEncryptor) {
-
             throw new Error('ZTA encryption library not loaded - ACCESS DENIED');
         }
         
@@ -262,12 +252,12 @@ async function decryptAndDisplay(encryptedPayload) {
         
         // Check for private key
         if (!window.ztaEncryptor.userPrivateKey) {
-            // Try to load from IndexedDB
             if (window.ztaAutomatedSetup) {
                 const keyPair = await window.ztaAutomatedSetup.getStoredKeyPair();
                 if (keyPair && keyPair.privateKey) {
                     window.ztaEncryptor.userPrivateKey = keyPair.privateKey;
                     window.ztaEncryptor.userPublicKey = keyPair.publicKey;
+                    console.log('✅ Loaded private key from IndexedDB');
                 } else {
                     throw new Error('No private key found - ACCESS DENIED');
                 }
@@ -276,36 +266,52 @@ async function decryptAndDisplay(encryptedPayload) {
             }
         }
         
-        // Attempt decryption - if fails, ACCESS DENIED
+        console.log('🔐 Attempting to decrypt response...');
+        
+        // Attempt decryption
         let decrypted;
         try {
             decrypted = await window.ztaEncryptor.decryptFromAgent(encryptedPayload);
+            console.log('✅ Decryption successful:', decrypted);
         } catch (decryptError) {
-            console.error('Decryption failed:', decryptError);
+            console.error('❌ Decryption failed:', decryptError);
             throw new Error('Decryption failed - ACCESS DENIED');
         }
         
-        // Validate decrypted data
         if (!decrypted) {
             throw new Error('Decryption produced no data - ACCESS DENIED');
         }
 
-        
         updateStep(5, 'completed', 'Response decrypted');
         updateStep(6, 'active', 'Rendering content...');
-        
 
-        // Extract and display resource data
+        // Check if access was allowed
+        if (!decrypted.allowed) {
+            throw new Error(decrypted.reason || 'Access denied by policy');
+        }
+
+        // Extract resource data from the API response
         let resourceData = null;
         
-        if (decrypted.api_response && decrypted.api_response.data) {
-            resourceData = decrypted.api_response.data;
-        } else if (decrypted.resource) {
-            resourceData = decrypted.resource;
-        } else if (decrypted.id || decrypted.name) {
+        // Our OPA Agent returns { allowed: true, api_response: { data: actual_resource } }
+        if (decrypted.api_response) {
+            if (decrypted.api_response.data) {
+                resourceData = decrypted.api_response.data;
+                console.log('✅ Resource data extracted from api_response.data:', resourceData);
+            } else if (decrypted.api_response.resource) {
+                resourceData = decrypted.api_response.resource;
+                console.log('✅ Resource data extracted from api_response.resource:', resourceData);
+            }
+        } 
+        
+        // Alternative format - direct resource
+        else if (decrypted.id || decrypted.name) {
             resourceData = decrypted;
-        } else {
-            throw new Error('Invalid response format - ACCESS DENIED');
+        }
+        
+        if (!resourceData) {
+            console.error('❌ Could not find resource data in response:', decrypted);
+            throw new Error('Invalid response format - no resource data found');
         }
         
         displayResource(resourceData);
@@ -414,10 +420,36 @@ function escapeHtml(text) {
 }
 
 // ========== INITIALIZATION ==========
-document.addEventListener('DOMContentLoaded', () => {
-    // Start the OPA flow with a small delay
-    setTimeout(fetchResourceThroughOPA, 300);
+document.addEventListener('DOMContentLoaded', async () => {
+    // Check if we have a stored encrypted response
+    const storedResourceId = sessionStorage.getItem('current_resource_id');
+    const storedResponse = sessionStorage.getItem('encrypted_response');
+    
+    if (storedResourceId && storedResponse && parseInt(storedResourceId) === resourceId) {
+        console.log('✅ Using stored encrypted response');
+        
+        // Clear the storage
+        sessionStorage.removeItem('current_resource_id');
+        sessionStorage.removeItem('encrypted_response');
+        
+        // Parse the stored response
+        const result = JSON.parse(storedResponse);
+        
+        // Update flow steps
+        updateStep(1, 'completed', 'JWT verified');
+        updateStep(2, 'completed', 'Request encrypted');
+        updateStep(3, 'completed', 'Policy evaluation');
+        updateStep(4, 'completed', 'Resource fetched');
+        
+        // Decrypt and display
+        await decryptAndDisplay(result.encrypted_response);
+    } else {
+        // No stored response, fetch fresh (fallback - shouldn't happen in production)
+        console.log('⚠️ No stored response, fetching fresh...');
+        setTimeout(fetchResourceThroughOPA, 300);
+    }
 });
+
 </script>
 
 {% endblock %}

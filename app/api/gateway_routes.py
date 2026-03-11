@@ -112,7 +112,7 @@ def request_resource_access(resource_id):
 
         user = User.query.get(user_claims.get("sub"))
 
-        if not user or not user.public_key:
+        if not user or not user.public_key_pem:
             event_logger.log_event(
                 event_type=EventType.SECURITY_VIOLATION,
                 source_component="gateway",
@@ -198,7 +198,7 @@ def request_resource_access(resource_id):
         # 5. Send to OPA Agent - if fails, access DENIED
         try:
             agent_response = communicator.opa_agent_client.send_to_agent(
-                encrypted_request, user.public_key, request_id
+                encrypted_request, user.public_key_pem, request_id
             )
 
             if not agent_response:
@@ -296,69 +296,6 @@ def request_resource_access(resource_id):
             trace_id=request_id,
         )
         return jsonify({"error": "Internal security error - access denied"}), 500
-
-
-@gateway_bp.route("/api/resources/<int:resource_id>/view", methods=["GET"])
-@require_authentication
-def view_resource(resource_id):
-    """View a specific resource"""
-    try:
-        user_claims = g.get("user_claims", {})
-        if not user_claims:
-            return jsonify({"error": "User claims required"}), 401
-
-        # For demo purposes, return a simple resource view
-        # In real implementation, this would fetch from API Server
-
-        sample_resources = {
-            1: {
-                "id": 1,
-                "name": "Public Notice Board",
-                "content": "This is public content for all government employees.",
-            },
-            2: {
-                "id": 2,
-                "name": "Government Circulars",
-                "content": "Latest government circulars and announcements.",
-            },
-            3: {
-                "id": 3,
-                "name": "MOD Operations Brief",
-                "content": "MOD department operations briefing.",
-            },
-            4: {
-                "id": 4,
-                "name": "MOD Budget Report",
-                "content": "MOD department budget report.",
-            },
-            5: {
-                "id": 5,
-                "name": "Top Secret MOD Plans",
-                "content": "🔒 TOP SECRET CONTENT: Classified MOD plans.",
-            },
-        }
-
-        if resource_id not in sample_resources:
-            return jsonify({"error": "Resource not found"}), 404
-
-        return (
-            jsonify(
-                {
-                    "resource": sample_resources[resource_id],
-                    "user": user_claims.get("username"),
-                    "access_time": datetime.utcnow().isoformat(),
-                    "zta_context": {
-                        "authentication": "mTLS + JWT",
-                        "authorization": "Department-based access control",
-                        "trace_id": g.get("request_id", "unknown"),
-                    },
-                }
-            ),
-            200,
-        )
-
-    except Exception as e:
-        return jsonify({"error": "Failed to retrieve resource", "message": str(e)}), 500
 
 
 @gateway_bp.route("/view-resource/<int:resource_id>")

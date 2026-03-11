@@ -250,39 +250,62 @@ async function loadResources() {
         
         const data = await response.json();
         
-        // Check if response is encrypted
+        // Handle encrypted response
         if (data.encrypted_payload) {
-            // We need to decrypt using the ZTA encryption library
             if (window.ztaEncryptor && window.ztaEncryptor.initialized) {
                 try {
                     const decrypted = await window.ztaEncryptor.decryptFromAgent(data.encrypted_payload);
                     console.log('Decrypted resources:', decrypted);
                     
-                    // Handle the decrypted response
-                    if (decrypted.allowed && decrypted.api_response) {
+                    // Check if access was allowed
+                    if (!decrypted.allowed) {
+                        console.error('Access denied:', decrypted.reason);
+                        resources = [];
+                        showError(`Access denied: ${decrypted.reason}`);
+                        return;
+                    }
+                    
+                    // Extract resources from the API response
+                    if (decrypted.api_response && decrypted.api_response.data) {
                         resources = decrypted.api_response.data || [];
                         console.log(`✅ Loaded ${resources.length} resources via encrypted flow`);
                     } else {
-                        console.error('Access denied by policy:', decrypted);
                         resources = [];
                     }
                 } catch (decryptError) {
                     console.error('Decryption failed:', decryptError);
                     resources = [];
+                    showError('Failed to decrypt resources');
                 }
             } else {
                 console.error('Encryption not initialized');
                 resources = [];
+                showError('Encryption not initialized');
             }
         } else {
-            // Direct response (for now)
+            // Direct response (fallback - should not happen in production)
             resources = data.resources || data || [];
-            console.log(`✅ Loaded ${resources.length} resources`);
+            console.log(`⚠️ Loaded ${resources.length} resources (unencrypted)`);
         }
         
     } catch (error) {
         console.error('Error loading resources:', error);
         resources = [];
+        showError(error.message);
+    }
+}
+
+// Add this helper function
+function showError(message) {
+    const portal = document.getElementById('resourcePortal');
+    if (portal) {
+        portal.innerHTML = `
+            <div class="alert alert-danger" style="margin: 2rem; padding: 1rem;">
+                <h4>❌ Error</h4>
+                <p>${escapeHtml(message)}</p>
+                <button onclick="loadResourcePortal()" class="btn btn-primary">Retry</button>
+            </div>
+        `;
     }
 }
 
@@ -609,6 +632,13 @@ function resetFilters() {
 async function requestResourceAccess(resourceId) {
     try {
         const token = localStorage.getItem('access_token');
+        
+        // Show loading state
+        const button = event.target;
+        const originalText = button.innerText;
+        button.innerText = '⏳ Loading...';
+        button.disabled = true;
+        
         const response = await fetch(`/api/resources/${resourceId}/access`, {
             method: 'POST',
             headers: { 
@@ -620,19 +650,25 @@ async function requestResourceAccess(resourceId) {
         if (!response.ok) {
             const error = await response.json();
             alert(`Access denied: ${error.message}`);
+            button.innerText = originalText;
+            button.disabled = false;
             return;
         }
         
         const result = await response.json();
         
-        if (result.requires_approval) {
-            alert('Access request submitted for JIT approval');
-        } else if (result.access_granted) {
-            alert('✅ Access granted! Opening resource...');
-            // Open the view endpoint
-            window.open(`/api/resources/${resourceId}/view`, '_blank');
+        // Check if we got an encrypted response
+        if (result.encrypted_response) {
+            // Store the resource ID in sessionStorage for the view page
+            sessionStorage.setItem('current_resource_id', resourceId);
+            sessionStorage.setItem('encrypted_response', JSON.stringify(result));
+            
+            // Navigate to the view page (which will handle decryption)
+            window.location.href = `/resources/${resourceId}/view`;
         } else {
             alert('Access request processed');
+            button.innerText = originalText;
+            button.disabled = false;
         }
         
     } catch (error) {
@@ -640,7 +676,6 @@ async function requestResourceAccess(resourceId) {
         alert('Error requesting access');
     }
 }
-
 // Initialize portal
 document.addEventListener('DOMContentLoaded', loadResourcePortal);
 </script>
