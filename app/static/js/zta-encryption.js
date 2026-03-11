@@ -727,4 +727,8 @@ window.decryptResourceResponse = async function(encryptedPayload) {
         console.error('Resource decryption failed:', error);
         throw error;
     }
+<<<<<<< HEAD
 };
+=======
+};
+>>>>>>> 7a18c90c8355e5456552baf7e8b1720973772e89

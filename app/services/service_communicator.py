@@ -142,7 +142,11 @@ class EncryptedServiceCommunicator:
                         pass
 
             logger.info(
+<<<<<<< HEAD
                 f"[{request_id}]  Processing resource request: ID={resource_id}"
+=======
+                f"[{request_id}] 📦 Processing resource request: ID={resource_id}"
+>>>>>>> 7a18c90c8355e5456552baf7e8b1720973772e89
             )
 
             # Get user's public key

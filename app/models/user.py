@@ -262,4 +262,8 @@ class Department(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     is_active = db.Column(db.Boolean, default=True)
     public_key = db.Column(db.Text, nullable=True)  # PEM format
+<<<<<<< HEAD
     public_key_fingerprint = db.Column(db.String(64), nullable=True)
+=======
+    public_key_fingerprint = db.Column(db.String(64), nullable=True)
+>>>>>>> 7a18c90c8355e5456552baf7e8b1720973772e89

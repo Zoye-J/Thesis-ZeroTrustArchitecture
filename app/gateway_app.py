@@ -256,6 +256,7 @@ def create_gateway_app(config_name="development"):
         )
 
     print("\n" + "=" * 60)
+<<<<<<< HEAD
     print(" ZTA GATEWAY SERVER WITH ENCRYPTION")
     print("=" * 60)
     print(" Port: 5000")
@@ -273,3 +274,22 @@ def create_gateway_app(config_name="development"):
     print("=" * 60)
 
     return app
+=======
+    print("🚀 ZTA GATEWAY SERVER WITH ENCRYPTION")
+    print("=" * 60)
+    print("📡 Port: 5000")
+    print("🔗 URLs:")
+    print("  • Login: https://localhost:5000/login")
+    print("  • Dashboard: https://localhost:5000/dashboard")
+    print("  • Encryption Status: https://localhost:5000/encryption-status")
+    print("🔐 Features:")
+    print("  • mTLS + JWT Authentication")
+    print(
+        "  • OPA Agent Encryption: "
+        + ("✅" if hasattr(app, "opa_agent_client") else "❌ (checking...)")
+    )  # <-- JUST CHECK IF CLIENT EXISTS, DON'T CHECK HEALTH
+    print("  • Service-to-Service Communication: ✅")
+    print("=" * 60)
+
+    return app
+>>>>>>> 7a18c90c8355e5456552baf7e8b1720973772e89

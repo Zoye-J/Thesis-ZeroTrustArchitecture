@@ -266,6 +266,7 @@ class OPARequestHandler(BaseHTTPRequestHandler):
 def run_opa_server():
     """Run the OPA server with fixed policies"""
     print("=" * 60)
+<<<<<<< HEAD
     print(" PYTHON OPA SERVER ")
     print("=" * 60)
     print(" Port: 8181")
@@ -281,6 +282,24 @@ def run_opa_server():
     print("=" * 60)
     print(" Event logging: ENABLED")
     print(" SSL: TLSv1.2 (Python 3.13 compatibility)")
+=======
+    print("🚀 PYTHON OPA SERVER - FIXED VERSION")
+    print("=" * 60)
+    print("📡 Port: 8181")
+    print("🔗 URL: https://localhost:8181")
+    print("🏥 Health: https://localhost:8181/health")
+    print("📋 Policies: https://localhost:8181/v1/policies")
+    print("⚖️  Evaluate: POST https://localhost:8181/v1/data/zta/allow")
+    print("💾 Policy logic: Built-in simple ZTA policies")
+    print("=" * 60)
+    print("📝 Policies implemented:")
+    print("  • Clearance hierarchy: BASIC → CONFIDENTIAL → SECRET → TOP_SECRET")
+    print("  • Department matching required")
+    print("  • TOP_SECRET: Business hours only (8 AM - 4 PM)")
+    print("=" * 60)
+    print("📊 Event logging: ENABLED")
+    print("🔐 SSL: TLSv1.2 (Python 3.13 compatibility)")
+>>>>>>> 7a18c90c8355e5456552baf7e8b1720973772e89
     print("\nPress Ctrl+C to stop the server")
 
     # Create SSL context
@@ -305,4 +324,8 @@ def run_opa_server():
 
 
 if __name__ == "__main__":
+<<<<<<< HEAD
     run_opa_server()
+=======
+    run_opa_server()
+>>>>>>> 7a18c90c8355e5456552baf7e8b1720973772e89

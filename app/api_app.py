@@ -227,4 +227,8 @@ def create_api_app(config_name="development"):
         db.create_all()
         print("✅ API Server: Database initialized")
 
+<<<<<<< HEAD
     return app
+=======
+    return app
+>>>>>>> 7a18c90c8355e5456552baf7e8b1720973772e89

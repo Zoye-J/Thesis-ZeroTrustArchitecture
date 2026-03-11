@@ -5,6 +5,7 @@ Forwards authorized requests to API server
 mTLS + HTTPS only - NO WebSockets
 """
 
+<<<<<<< HEAD
 try:
     from app import ssl_patch  # This applies the Python 3.13 SSL fix
 
@@ -12,6 +13,8 @@ try:
 except ImportError:
     print("⚠️ Could not import SSL patch")
 
+=======
+>>>>>>> 7a18c90c8355e5456552baf7e8b1720973772e89
 import sys
 import os
 from flask import render_template, g
@@ -315,6 +318,7 @@ def zta_test():
     )
 
 
+<<<<<<< HEAD
 @app.route("/debug/opa-key", methods=["GET"])
 def debug_opa_key():
     """Debug OPA Agent public key"""
@@ -342,6 +346,8 @@ def debug_opa_key():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+=======
+>>>>>>> 7a18c90c8355e5456552baf7e8b1720973772e89
 @app.route("/health", methods=["GET"])
 def health():
     """Health check"""

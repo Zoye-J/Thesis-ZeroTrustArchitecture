@@ -5,7 +5,10 @@ No authentication decorators - gateway handles authentication
 
 from flask import Blueprint, request, jsonify, current_app, g
 from app.api_models import db, User, GovernmentDocument, AccessLog
+<<<<<<< HEAD
 from app.logs.zta_event_logger import event_logger, EventType, Severity
+=======
+>>>>>>> 7a18c90c8355e5456552baf7e8b1720973772e89
 from app.logs.request_tracker import log_request
 from app.logs.zta_event_logger import event_logger, EventType
 from datetime import datetime
@@ -115,6 +118,7 @@ def get_document(document_id):
         return jsonify({"error": "Failed to fetch document", "message": str(e)}), 500
 
 
+<<<<<<< HEAD
 @api_bp.route("/api/internal/encrypt-for-user", methods=["POST"])
 def encrypt_for_user():
     """
@@ -238,6 +242,8 @@ def encrypt_for_user():
         return jsonify({"error": "Internal server error - access denied"}), 500
 
 
+=======
+>>>>>>> 7a18c90c8355e5456552baf7e8b1720973772e89
 @api_bp.route("/documents", methods=["POST"])
 def create_document():
     """Create document - called by gateway after auth"""

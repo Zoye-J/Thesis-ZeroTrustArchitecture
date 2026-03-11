@@ -47,4 +47,8 @@ if __name__ == "__main__":
         port=app.config.get("API_SERVER_PORT", 5001),
         ssl_context=ssl_context,
         use_reloader=False,  # Add this to prevent socket issues
+<<<<<<< HEAD
     )
+=======
+    )
+>>>>>>> 7a18c90c8355e5456552baf7e8b1720973772e89

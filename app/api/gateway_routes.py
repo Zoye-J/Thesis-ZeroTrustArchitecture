@@ -84,6 +84,7 @@ def decrypt_from_agent(encrypted_data):
 @gateway_bp.route("/api/resources/<int:resource_id>/access", methods=["POST"])
 @require_authentication
 def request_resource_access(resource_id):
+<<<<<<< HEAD
     """
     PURE ENCRYPTED RESOURCE ACCESS - NO FALLBACKS
     If any step fails → ACCESS DENIED
@@ -279,6 +280,32 @@ def request_resource_access(resource_id):
                         "trace_id": request_id,
                         "policy_evaluated": True,
                         "encryption_used": True,
+=======
+    """Request access to a specific resource"""
+    try:
+        user_claims = g.get("user_claims", {})
+        if not user_claims:
+            return jsonify({"error": "User claims required"}), 401
+
+        print(
+            f"📡 Resource access request: User {user_claims.get('username')} for resource {resource_id}"
+        )
+
+        # Just return success for now - in real implementation, this would check access
+        return (
+            jsonify(
+                {
+                    "success": True,
+                    "message": "Access granted",
+                    "resource_id": resource_id,
+                    "requires_approval": False,
+                    "access_granted": True,
+                    "zta_context": {
+                        "user": user_claims.get("username"),
+                        "department": user_claims.get("department"),
+                        "clearance": user_claims.get("clearance_level"),
+                        "flow": "User → Gateway → Access Granted",
+>>>>>>> 7a18c90c8355e5456552baf7e8b1720973772e89
                     },
                 }
             ),
@@ -286,6 +313,7 @@ def request_resource_access(resource_id):
         )
 
     except Exception as e:
+<<<<<<< HEAD
         # Log unexpected error and DENY access
         event_logger.log_event(
             event_type=EventType.ERROR,
@@ -296,6 +324,12 @@ def request_resource_access(resource_id):
             trace_id=request_id,
         )
         return jsonify({"error": "Internal security error - access denied"}), 500
+=======
+        return (
+            jsonify({"error": "Failed to process access request", "message": str(e)}),
+            500,
+        )
+>>>>>>> 7a18c90c8355e5456552baf7e8b1720973772e89
 
 
 @gateway_bp.route("/api/resources/<int:resource_id>/view", methods=["GET"])
@@ -551,9 +585,13 @@ def get_documents():
             encrypted_request = encrypt_for_agent(request_data, agent_public_key)
 
         # 4. Send to OPA Agent (8282)
+<<<<<<< HEAD
         opa_agent_url = current_app.config.get(
             "OPA_AGENT_URL", "https://localhost:8282"
         )
+=======
+        opa_agent_url = current_app.config.get("OPA_AGENT_URL", "https://localhost:8282")
+>>>>>>> 7a18c90c8355e5456552baf7e8b1720973772e89
 
         response = requests.post(
             f"{opa_agent_url}/evaluate",
@@ -822,9 +860,13 @@ def get_single_document(document_id):
         agent_public_key = current_app.config.get("OPA_AGENT_PUBLIC_KEY")
         encrypted_request = encrypt_for_agent(request_data, agent_public_key)
 
+<<<<<<< HEAD
         opa_agent_url = current_app.config.get(
             "OPA_AGENT_URL", "https://localhost:8282"
         )
+=======
+        opa_agent_url = current_app.config.get("OPA_AGENT_URL", "https://localhost:8282")
+>>>>>>> 7a18c90c8355e5456552baf7e8b1720973772e89
 
         response = requests.post(
             f"{opa_agent_url}/evaluate",
@@ -915,9 +957,13 @@ def get_users():
         agent_public_key = current_app.config.get("OPA_AGENT_PUBLIC_KEY")
         encrypted_request = encrypt_for_agent(request_data, agent_public_key)
 
+<<<<<<< HEAD
         opa_agent_url = current_app.config.get(
             "OPA_AGENT_URL", "https://localhost:8282"
         )
+=======
+        opa_agent_url = current_app.config.get("OPA_AGENT_URL", "https://localhost:8282")
+>>>>>>> 7a18c90c8355e5456552baf7e8b1720973772e89
 
         response = requests.post(
             f"{opa_agent_url}/evaluate",

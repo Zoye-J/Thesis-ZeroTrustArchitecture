@@ -239,13 +239,17 @@ async function fetchResourceThroughOPA() {
 }
 
 // ========== DECRYPTION ==========
+<<<<<<< HEAD
 
+=======
+>>>>>>> 7a18c90c8355e5456552baf7e8b1720973772e89
 async function decryptAndDisplay(encryptedPayload) {
     try {
         updateStep(5, 'active', 'Decrypting response...');
         
         // Check if encryption is available
         if (!window.ztaEncryptor) {
+<<<<<<< HEAD
             throw new Error('ZTA encryption library not loaded - ACCESS DENIED');
         }
         
@@ -285,10 +289,23 @@ async function decryptAndDisplay(encryptedPayload) {
         if (!decrypted) {
             throw new Error('Decryption produced no data - ACCESS DENIED');
         }
+=======
+            throw new Error('ZTA encryption library not loaded');
+        }
+        
+        if (!window.ztaEncryptor.initialized) {
+            // Try to initialize
+            await window.ztaEncryptor.init();
+        }
+        
+        // Use ZTA encryption library to decrypt
+        const decrypted = await window.ztaEncryptor.decryptFromAgent(encryptedPayload);
+>>>>>>> 7a18c90c8355e5456552baf7e8b1720973772e89
         
         updateStep(5, 'completed', 'Response decrypted');
         updateStep(6, 'active', 'Rendering content...');
         
+<<<<<<< HEAD
         // Extract and display resource data
         let resourceData = null;
         
@@ -311,6 +328,27 @@ async function decryptAndDisplay(encryptedPayload) {
         showError(error.message);
     }
 }
+=======
+        if (decrypted.allowed && decrypted.api_response && decrypted.api_response.data) {
+            // Access granted
+            setTimeout(() => {
+                updateStep(6, 'completed', 'Content displayed');
+                displayResource(decrypted.api_response.data);
+            }, 300);
+        } else {
+            // Access denied
+            updateStep(3, 'failed', 'Policy denied access');
+            showError(`Access denied: ${decrypted.reason || 'Policy violation'}`);
+        }
+        
+    } catch (error) {
+        console.error('Decryption error:', error);
+        updateStep(5, 'failed', 'Decryption error');
+        showError(`Decryption failed: ${error.message}`);
+    }
+}
+
+>>>>>>> 7a18c90c8355e5456552baf7e8b1720973772e89
 // ========== DISPLAY RESOURCE ==========
 function displayResource(resourceData) {
     const contentDiv = document.getElementById('resource-content');
