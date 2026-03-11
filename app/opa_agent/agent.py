@@ -446,8 +446,4 @@ class OpaAgent:
             raise ValueError(f"Invalid request data: {str(e)}")
         except Exception as e:
             logger.error(f"[{request_id}] OPA Agent processing failed: {e}")
-<<<<<<< HEAD
             raise
-=======
-            raise
->>>>>>> 7a18c90c8355e5456552baf7e8b1720973772e89

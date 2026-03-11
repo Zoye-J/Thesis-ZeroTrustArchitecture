@@ -367,7 +367,6 @@ def create_opa_agent_app():
 
 if __name__ == "__main__":
     print("=" * 60)
-<<<<<<< HEAD
     print(" OPA AGENT SERVER WITH ENCRYPTION")
     print("=" * 60)
     print(f" Port: 8282")
@@ -375,16 +374,6 @@ if __name__ == "__main__":
     print(f" Health: https://localhost:8282/health")
     print(f" Public Key: https://localhost:8282/public-key")
     print(f" Evaluate: POST https://localhost:8282/evaluate")
-=======
-    print("🔐 OPA AGENT SERVER WITH ENCRYPTION")
-    print("=" * 60)
-    print(f"📡 Port: 8282")
-    print(f"🔗 URL: https://localhost:8282")
-    print(f"🏥 Health: https://localhost:8282/health")
-    print(f"🔑 Public Key: https://localhost:8282/public-key")
-    print(f"⚖️  Evaluate: POST https://localhost:8282/evaluate")
-    print(f"📊 Real-time Events: YES (via Gateway Dashboard)")
->>>>>>> 7a18c90c8355e5456552baf7e8b1720973772e89
     print("=" * 60)
     print("Press Ctrl+C to stop")
 
