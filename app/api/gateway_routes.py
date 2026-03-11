@@ -84,30 +84,201 @@ def decrypt_from_agent(encrypted_data):
 @gateway_bp.route("/api/resources/<int:resource_id>/access", methods=["POST"])
 @require_authentication
 def request_resource_access(resource_id):
-    """Request access to a specific resource"""
+    """
+    PURE ENCRYPTED RESOURCE ACCESS - NO FALLBACKS
+    If any step fails → ACCESS DENIED
+    """
     try:
         user_claims = g.get("user_claims", {})
         if not user_claims:
-            return jsonify({"error": "User claims required"}), 401
+            return jsonify({"error": "Authentication required"}), 401
 
-        print(
-            f"📡 Resource access request: User {user_claims.get('username')} for resource {resource_id}"
+        request_id = str(uuid.uuid4())
+        g.request_id = request_id
+
+        # Log access attempt
+        event_logger.log_event(
+            event_type=EventType.RESOURCE_ACCESS_ATTEMPT,
+            source_component="gateway",
+            action="Resource access attempt",
+            user_id=user_claims.get("sub"),
+            username=user_claims.get("username"),
+            details={"resource_id": resource_id},
+            trace_id=request_id,
         )
 
-        # Just return success for now - in real implementation, this would check access
+        # 1. MUST have user public key - if not, access DENIED
+        from app.models.user import User
+
+        user = User.query.get(user_claims.get("sub"))
+
+        if not user or not user.public_key:
+            event_logger.log_event(
+                event_type=EventType.SECURITY_VIOLATION,
+                source_component="gateway",
+                action="Missing user public key",
+                user_id=user_claims.get("sub"),
+                severity=Severity.HIGH,
+                trace_id=request_id,
+            )
+            return (
+                jsonify(
+                    {
+                        "error": "Security violation - user keys not found",
+                        "code": "KEYS_MISSING",
+                    }
+                ),
+                403,
+            )
+
+        # 2. MUST have OPA Agent client - core security component
+        from app.services.service_communicator import get_service_communicator
+
+        communicator = get_service_communicator()
+
+        if not communicator.opa_agent_client:
+            event_logger.log_event(
+                event_type=EventType.SECURITY_VIOLATION,
+                source_component="gateway",
+                action="OPA Agent unavailable - cannot authorize",
+                severity=Severity.CRITICAL,
+                trace_id=request_id,
+            )
+            return (
+                jsonify(
+                    {
+                        "error": "Security service unavailable - access denied",
+                        "code": "OPA_AGENT_UNAVAILABLE",
+                    }
+                ),
+                503,
+            )
+
+        # 3. Build context for policy evaluation
+        current_hour = datetime.now().hour
+
+        # Get resource classification from database (never hardcode in production)
+        from app.models.user import GovernmentDocument
+
+        resource = GovernmentDocument.query.get(resource_id)
+
+        if not resource:
+            return jsonify({"error": "Resource not found"}), 404
+
+        context = {
+            "u": {
+                "c": user.clearance_level,  # From database, not claims
+                "d": user.department,
+            },
+            "r": {
+                "c": resource.classification,
+                "d": resource.department,
+                "id": resource_id,
+            },
+            "e": {"h": current_hour, "tz": "Asia/Dhaka"},  # Bangladesh timezone
+            "id": request_id,
+        }
+
+        # 4. Encrypt for OPA Agent - if fails, access DENIED
+        try:
+            encrypted_request = communicator.opa_agent_client.encrypt_for_agent(context)
+            if not encrypted_request:
+                raise Exception("Encryption produced no output")
+        except Exception as e:
+            event_logger.log_event(
+                event_type=EventType.ENCRYPTION_FAILED,
+                source_component="gateway",
+                action="Failed to encrypt for OPA Agent",
+                details={"error": str(e)},
+                severity=Severity.HIGH,
+                trace_id=request_id,
+            )
+            return jsonify({"error": "Security encryption failed"}), 500
+
+        # 5. Send to OPA Agent - if fails, access DENIED
+        try:
+            agent_response = communicator.opa_agent_client.send_to_agent(
+                encrypted_request, user.public_key, request_id
+            )
+
+            if not agent_response:
+                raise Exception("No response from OPA Agent")
+
+        except Exception as e:
+            event_logger.log_event(
+                event_type=EventType.SECURITY_VIOLATION,
+                source_component="gateway",
+                action="OPA Agent communication failed",
+                details={"error": str(e)},
+                severity=Severity.CRITICAL,
+                trace_id=request_id,
+            )
+            return jsonify({"error": "Policy evaluation service unavailable"}), 503
+
+        # 6. Check if OPA Agent denied access
+        if agent_response.get("access_denied"):
+            event_logger.log_event(
+                event_type=EventType.ACCESS_DENIED,
+                source_component="gateway",
+                action="Policy denied access",
+                user_id=user.id,
+                details={
+                    "resource_id": resource_id,
+                    "reason": agent_response.get("reason", "Policy violation"),
+                    "policy_used": agent_response.get("policy"),
+                },
+                trace_id=request_id,
+            )
+            return (
+                jsonify(
+                    {
+                        "error": "Access denied by security policy",
+                        "reason": agent_response.get("reason"),
+                        "code": "POLICY_DENIED",
+                    }
+                ),
+                403,
+            )
+
+        # 7. Get encrypted response from OPA Agent
+        encrypted_response = agent_response.get("encrypted_response")
+        if not encrypted_response:
+            event_logger.log_event(
+                event_type=EventType.SECURITY_VIOLATION,
+                source_component="gateway",
+                action="OPA Agent returned no encrypted response",
+                severity=Severity.HIGH,
+                trace_id=request_id,
+            )
+            return jsonify({"error": "Invalid response from security service"}), 500
+
+        # 8. Log successful access
+        event_logger.log_event(
+            event_type=EventType.ACCESS_GRANTED,
+            source_component="gateway",
+            action="Resource access granted",
+            user_id=user.id,
+            username=user.username,
+            details={"resource_id": resource_id, "resource_name": resource.name},
+            trace_id=request_id,
+        )
+
+        # 9. Return ONLY encrypted data to client
         return (
             jsonify(
                 {
-                    "success": True,
-                    "message": "Access granted",
+                    "encrypted_response": encrypted_response,
                     "resource_id": resource_id,
-                    "requires_approval": False,
-                    "access_granted": True,
+                    "encryption": {
+                        "algorithm": "RSA-OAEP-SHA256",
+                        "key_size": 2048,
+                        "mode": "end-to-end",
+                    },
                     "zta_context": {
-                        "user": user_claims.get("username"),
-                        "department": user_claims.get("department"),
-                        "clearance": user_claims.get("clearance_level"),
-                        "flow": "User → Gateway → Access Granted",
+                        "flow": "User → Gateway → OPA Agent → OPA Server → API Server → OPA Agent → Gateway → User",
+                        "trace_id": request_id,
+                        "policy_evaluated": True,
+                        "encryption_used": True,
                     },
                 }
             ),
@@ -115,10 +286,16 @@ def request_resource_access(resource_id):
         )
 
     except Exception as e:
-        return (
-            jsonify({"error": "Failed to process access request", "message": str(e)}),
-            500,
+        # Log unexpected error and DENY access
+        event_logger.log_event(
+            event_type=EventType.ERROR,
+            source_component="gateway",
+            action="Unexpected error in resource access",
+            details={"error": str(e)},
+            severity=Severity.CRITICAL,
+            trace_id=request_id,
         )
+        return jsonify({"error": "Internal security error - access denied"}), 500
 
 
 @gateway_bp.route("/api/resources/<int:resource_id>/view", methods=["GET"])

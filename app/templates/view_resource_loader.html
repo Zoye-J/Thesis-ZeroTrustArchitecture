@@ -239,45 +239,78 @@ async function fetchResourceThroughOPA() {
 }
 
 // ========== DECRYPTION ==========
+
 async function decryptAndDisplay(encryptedPayload) {
     try {
         updateStep(5, 'active', 'Decrypting response...');
         
         // Check if encryption is available
         if (!window.ztaEncryptor) {
-            throw new Error('ZTA encryption library not loaded');
+            throw new Error('ZTA encryption library not loaded - ACCESS DENIED');
         }
         
         if (!window.ztaEncryptor.initialized) {
-            // Try to initialize
             await window.ztaEncryptor.init();
+            if (!window.ztaEncryptor.initialized) {
+                throw new Error('Encryption initialization failed - ACCESS DENIED');
+            }
         }
         
-        // Use ZTA encryption library to decrypt
-        const decrypted = await window.ztaEncryptor.decryptFromAgent(encryptedPayload);
+        // Check for private key
+        if (!window.ztaEncryptor.userPrivateKey) {
+            // Try to load from IndexedDB
+            if (window.ztaAutomatedSetup) {
+                const keyPair = await window.ztaAutomatedSetup.getStoredKeyPair();
+                if (keyPair && keyPair.privateKey) {
+                    window.ztaEncryptor.userPrivateKey = keyPair.privateKey;
+                    window.ztaEncryptor.userPublicKey = keyPair.publicKey;
+                } else {
+                    throw new Error('No private key found - ACCESS DENIED');
+                }
+            } else {
+                throw new Error('No private key available - ACCESS DENIED');
+            }
+        }
+        
+        // Attempt decryption - if fails, ACCESS DENIED
+        let decrypted;
+        try {
+            decrypted = await window.ztaEncryptor.decryptFromAgent(encryptedPayload);
+        } catch (decryptError) {
+            console.error('Decryption failed:', decryptError);
+            throw new Error('Decryption failed - ACCESS DENIED');
+        }
+        
+        // Validate decrypted data
+        if (!decrypted) {
+            throw new Error('Decryption produced no data - ACCESS DENIED');
+        }
         
         updateStep(5, 'completed', 'Response decrypted');
         updateStep(6, 'active', 'Rendering content...');
         
-        if (decrypted.allowed && decrypted.api_response && decrypted.api_response.data) {
-            // Access granted
-            setTimeout(() => {
-                updateStep(6, 'completed', 'Content displayed');
-                displayResource(decrypted.api_response.data);
-            }, 300);
+        // Extract and display resource data
+        let resourceData = null;
+        
+        if (decrypted.api_response && decrypted.api_response.data) {
+            resourceData = decrypted.api_response.data;
+        } else if (decrypted.resource) {
+            resourceData = decrypted.resource;
+        } else if (decrypted.id || decrypted.name) {
+            resourceData = decrypted;
         } else {
-            // Access denied
-            updateStep(3, 'failed', 'Policy denied access');
-            showError(`Access denied: ${decrypted.reason || 'Policy violation'}`);
+            throw new Error('Invalid response format - ACCESS DENIED');
         }
         
+        displayResource(resourceData);
+        updateStep(6, 'completed', 'Content displayed');
+        
     } catch (error) {
-        console.error('Decryption error:', error);
-        updateStep(5, 'failed', 'Decryption error');
-        showError(`Decryption failed: ${error.message}`);
+        console.error('ZTA security error:', error);
+        updateStep(5, 'failed', error.message);
+        showError(error.message);
     }
 }
-
 // ========== DISPLAY RESOURCE ==========
 function displayResource(resourceData) {
     const contentDiv = document.getElementById('resource-content');

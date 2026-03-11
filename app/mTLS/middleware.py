@@ -461,3 +461,4 @@ def log_mtls_handshake(cert_pem, request_id=None):
             trace_id=request_id,
         )
         return False, str(e)
+

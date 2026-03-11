@@ -5,6 +5,13 @@ Forwards authorized requests to API server
 mTLS + HTTPS only - NO WebSockets
 """
 
+try:
+    from app import ssl_patch  # This applies the Python 3.13 SSL fix
+
+    print("✅ Applied SSL patch for Python 3.13")
+except ImportError:
+    print("⚠️ Could not import SSL patch")
+
 import sys
 import os
 from flask import render_template, g
@@ -307,6 +314,33 @@ def zta_test():
         }
     )
 
+
+@app.route("/debug/opa-key", methods=["GET"])
+def debug_opa_key():
+    """Debug OPA Agent public key"""
+    try:
+        from app.opa_agent.client import get_opa_agent_client
+        
+        client = get_opa_agent_client()
+        agent_public_key = client.agent_public_key  # Changed from public_key to agent_public_key
+        
+        # Also check via cert_manager directly
+        from app.mTLS.cert_manager import cert_manager
+        cert_manager_key = cert_manager.load_opa_agent_public_key()
+        
+        return jsonify({
+            "client_key_loaded": bool(agent_public_key),
+            "client_key_length": len(agent_public_key) if agent_public_key else 0,
+            "client_key_valid": agent_public_key and agent_public_key.startswith("-----BEGIN PUBLIC KEY-----") if agent_public_key else False,
+            "client_key_preview": agent_public_key[:100] + "..." if agent_public_key else None,
+            "cert_manager_key_loaded": bool(cert_manager_key),
+            "cert_manager_key_length": len(cert_manager_key) if cert_manager_key else 0,
+            "cert_manager_key_valid": cert_manager_key and cert_manager_key.startswith("-----BEGIN PUBLIC KEY-----") if cert_manager_key else False,
+            "opa_agent_client": str(client),
+            "session_created": bool(client.session),
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/health", methods=["GET"])
 def health():
