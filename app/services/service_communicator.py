@@ -130,7 +130,7 @@ class EncryptedServiceCommunicator:
         return self._handle_encrypted_request(flask_request, user_claims, request_id)
 
     def _handle_resource_request(self, flask_request, user_claims, request_id):
-        """Handle resource requests through encrypted flow"""
+        """Handle resource requests through encrypted flow - NO FALLBACKS"""
         try:
             # Extract resource ID
             parts = flask_request.path.split("/")
@@ -143,32 +143,15 @@ class EncryptedServiceCommunicator:
                     except ValueError:
                         pass
 
-            logger.info(
-                f"[{request_id}]  Processing resource request: ID={resource_id}"
-            )
+            logger.info(f"[{request_id}] Processing resource request: ID={resource_id}")
 
             # Get user's public key
             user_public_key = self._get_user_public_key(user_claims.get("sub"))
             if not user_public_key:
-                # Try from claims or generate a test key
-                user_public_key = user_claims.get("public_key")
-                if not user_public_key:
-                    # Generate a test RSA key for demo
-                    from cryptography.hazmat.primitives import serialization
-                    from cryptography.hazmat.primitives.asymmetric import rsa
-
-                    private_key = rsa.generate_private_key(
-                        public_exponent=65537,
-                        key_size=2048,
-                    )
-                    public_key = private_key.public_key()
-
-                    user_public_key = public_key.public_bytes(
-                        encoding=serialization.Encoding.PEM,
-                        format=serialization.PublicFormat.SubjectPublicKeyInfo,
-                    ).decode("utf-8")
-
-                    logger.info(f"[{request_id}] Generated demo public key for user")
+                logger.error(f"[{request_id}] No public key found for user")
+                return self._create_error_response(
+                    400, "User public key not found - ACCESS DENIED", request_id
+                )
 
             # Build request for OPA Agent
             request_data = self._build_resource_request_data(
@@ -177,14 +160,13 @@ class EncryptedServiceCommunicator:
 
             # Check if OPA Agent is available
             if not self.opa_agent_client:
-                logger.error(f"[{request_id}] OPA Agent not available")
+                logger.error(f"[{request_id}] OPA Agent not available - ACCESS DENIED")
                 return self._create_error_response(
-                    503, "Security service unavailable - access denied", request_id
+                    503, "Security service unavailable - ACCESS DENIED", request_id
                 )
 
             # Step 1: Encrypt and send to OPA Agent
             logger.info(f"[{request_id}] 🔐 Encrypting request for OPA Agent")
-
             try:
                 encrypted_request = self.opa_agent_client.encrypt_for_agent(
                     request_data
@@ -192,25 +174,11 @@ class EncryptedServiceCommunicator:
             except Exception as e:
                 logger.error(f"[{request_id}] Encryption failed: {e}")
                 return self._create_error_response(
-                    500, f"Encryption failed - access denied", request_id
+                    500, f"Encryption failed - ACCESS DENIED", request_id
                 )
 
             # Step 2: Send to OPA Agent
             logger.info(f"[{request_id}] 📡 Sending to OPA Agent")
-            from app.models.user import User
-
-            user = User.query.get(user_claims.get("sub"))
-            if not user:
-                return self._create_error_response(404, "User not found", request_id)
-
-            user_public_key = (
-                user.public_key_pem
-            )  # Use the property, not direct attribute
-            if not user_public_key:
-                return self._create_error_response(
-                    400, "User public key not found", request_id
-                )
-
             agent_response = self.opa_agent_client.send_to_agent(
                 encrypted_request, user_public_key, request_id
             )
@@ -218,7 +186,7 @@ class EncryptedServiceCommunicator:
             if not agent_response:
                 logger.error(f"[{request_id}] ❌ OPA Agent did not respond")
                 return self._create_error_response(
-                    503, "Security service unavailable - access denied", request_id
+                    503, "Security service unavailable - ACCESS DENIED", request_id
                 )
 
             # Check if access denied
@@ -234,7 +202,9 @@ class EncryptedServiceCommunicator:
             if not encrypted_response:
                 logger.error(f"[{request_id}] ❌ No encrypted response from OPA Agent")
                 return self._create_error_response(
-                    500, "Invalid response from security service", request_id
+                    500,
+                    "Invalid response from security service - ACCESS DENIED",
+                    request_id,
                 )
 
             # Log successful encrypted flow
@@ -278,7 +248,7 @@ class EncryptedServiceCommunicator:
         except Exception as e:
             logger.error(f"[{request_id}] Resource request error: {e}")
             return self._create_error_response(
-                500, f"Resource request failed: {str(e)}", request_id
+                500, f"Resource request failed - ACCESS DENIED", request_id
             )
 
     def _build_resource_request_data(
@@ -328,7 +298,7 @@ class EncryptedServiceCommunicator:
                 },
                 "id": request_id,
                 # ADD THESE FIELDS FOR API CALL
-                "endpoint": f"/documents/{resource_id}",  # ✅ FIXED: matches API Server routes
+                "endpoint": f"/api/documents/{resource_id}",  # ✅ FIXED: matches API Server routes
                 "method": "GET",
                 "user": {
                     "id": user_claims.get("sub"),

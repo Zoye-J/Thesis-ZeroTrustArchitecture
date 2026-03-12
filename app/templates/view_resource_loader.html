@@ -1,20 +1,9 @@
 {% extends "base.html" %}
 
 {% block title %}Loading Resource - Government ZTA System{% endblock %}
+
 {% block extra_scripts %}
 <script src="{{ url_for('static', filename='js/zta-encryption.js') }}"></script>
-<script>
-// Ensure ztaEncryptor is loaded before anything else
-window.ZTA_LOADED = false;
-document.addEventListener('DOMContentLoaded', function() {
-    if (window.ztaEncryptor) {
-        window.ZTA_LOADED = true;
-        console.log('✅ ztaEncryptor loaded from script tag');
-    } else {
-        console.error('❌ ztaEncryptor not loaded - check script path');
-    }
-});
-</script>
 {% endblock %}
 
 {% block extra_css %}
@@ -437,6 +426,36 @@ function escapeHtml(text) {
 
 // ========== INITIALIZATION ==========
 document.addEventListener('DOMContentLoaded', async () => {
+    console.log('View Resource Loader: Starting initialization');
+    
+    // Wait for ztaEncryptor to be available
+    let retries = 0;
+    const maxRetries = 10;
+    
+    while (!window.ztaEncryptor && retries < maxRetries) {
+        console.log(`Waiting for ztaEncryptor... (${retries + 1}/${maxRetries})`);
+        await new Promise(resolve => setTimeout(resolve, 500));
+        retries++;
+    }
+    
+    if (!window.ztaEncryptor) {
+        console.error('❌ ztaEncryptor failed to load after 10 retries');
+        showError('Security module failed to load - please refresh the page');
+        return;
+    }
+    
+    console.log('✅ ztaEncryptor loaded successfully');
+    
+    // Initialize encryption
+    try {
+        await window.ztaEncryptor.init();
+        console.log('✅ Encryption initialized');
+    } catch (error) {
+        console.error('❌ Encryption init failed:', error);
+        showError('Encryption initialization failed - ACCESS DENIED');
+        return;
+    }
+    
     // Check if we have a stored encrypted response
     const storedResourceId = sessionStorage.getItem('current_resource_id');
     const storedResponse = sessionStorage.getItem('encrypted_response');
@@ -460,7 +479,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Decrypt and display
         await decryptAndDisplay(result.encrypted_response);
     } else {
-        // No stored response, fetch fresh (fallback - shouldn't happen in production)
+        // No stored response, fetch fresh
         console.log('⚠️ No stored response, fetching fresh...');
         setTimeout(fetchResourceThroughOPA, 300);
     }

@@ -1,15 +1,26 @@
 // FINAL FIXED VERSION: app/static/js/zta-encryption.js
-
+console.log('🔐 zta-encryption.js loaded at:', new Date().toISOString());
 class ZTAEncryption {
     constructor() {
         this.agentPublicKey = null;
         this.userPrivateKey = null;
         this.userPublicKey = null;
         this.initialized = false;
-        this.setup = window.ztaAutomatedSetup; // Reference to setup class
+        this.initPromise = null; // Add promise to track initialization
+        this.setup = window.ztaAutomatedSetup;
     }
     
     async init() {
+        // Prevent multiple simultaneous initializations
+        if (this.initPromise) {
+            return this.initPromise;
+        }
+        
+        this.initPromise = this._doInit();
+        return this.initPromise;
+    }
+    
+    async _doInit() {
         try {
             console.log('Initializing ZTA encryption...');
             
@@ -25,9 +36,9 @@ class ZTAEncryption {
                 if (agentKeyResponse.ok) {
                     const agentKeyData = await agentKeyResponse.json();
                     this.agentPublicKey = agentKeyData.public_key;
-                    console.log('OPA Agent public key loaded');
+                    console.log('✅ OPA Agent public key loaded');
                 } else {
-                    console.warn('⚠️ Could not get OPA Agent key, using fallback encryption');
+                    console.warn('⚠️ Could not get OPA Agent key');
                 }
             } catch (error) {
                 console.warn('Failed to fetch OPA Agent key:', error);
@@ -40,27 +51,37 @@ class ZTAEncryption {
                     if (keyPair && keyPair.privateKey) {
                         this.userPrivateKey = keyPair.privateKey;
                         this.userPublicKey = keyPair.publicKey;
-                        console.log('User RSA keys loaded from IndexedDB');
+                        console.log('✅ User RSA keys loaded from IndexedDB');
                     }
                 } catch (error) {
                     console.warn('Could not load user keys:', error);
                 }
             }
             
-            // 3. Skip user public key from server - not needed for registration
-            // User doesn't exist yet during registration!
-            
             this.initialized = true;
             console.log('✅ ZTA Encryption initialized');
+            return true;
             
         } catch (error) {
-            console.error('Failed to initialize ZTA encryption:', error);
-            // Don't throw - allow system to work without encryption
+            console.error('❌ Failed to initialize ZTA encryption:', error);
             this.initialized = false;
+            throw error;
         }
     }
     
+    async ensureInitialized() {
+        if (!this.initialized) {
+            await this.init();
+        }
+        if (!this.initialized) {
+            throw new Error('ZTA encryption initialization failed');
+        }
+        return true;
+    }
+    
     async encryptForAgent(data) {
+        await this.ensureInitialized();
+        
         if (!this.agentPublicKey) {
             throw new Error('OPA Agent public key not available');
         }
@@ -140,8 +161,26 @@ class ZTAEncryption {
     }
     
     async decryptFromAgent(encryptedData) {
+        await this.ensureInitialized();
+        
         if (!this.userPrivateKey) {
-            throw new Error('User private key not available');
+            // Try one more time to load from IndexedDB
+            if (this.setup) {
+                try {
+                    const keyPair = await this.setup.getStoredKeyPair();
+                    if (keyPair && keyPair.privateKey) {
+                        this.userPrivateKey = keyPair.privateKey;
+                        this.userPublicKey = keyPair.publicKey;
+                        console.log('✅ Loaded private key on demand from IndexedDB');
+                    }
+                } catch (error) {
+                    console.error('Failed to load private key on demand:', error);
+                }
+            }
+            
+            if (!this.userPrivateKey) {
+                throw new Error('User private key not available');
+            }
         }
         
         try {
@@ -184,7 +223,6 @@ class ZTAEncryption {
         }
     }
 
-    // Add new method for backend hybrid format
     async hybridDecryptBackend(encryptedPackage) {
         const privateKey = await this.importPrivateKey(this.userPrivateKey);
         
@@ -302,9 +340,7 @@ class ZTAEncryption {
     }
     
     async sendEncryptedRequest(endpoint, method = 'GET', data = null) {
-        if (!this.initialized) {
-            await this.init();
-        }
+        await this.ensureInitialized();
         
         // Attach certificate if we have automated setup
         let headers = { 'Content-Type': 'application/json' };
@@ -361,9 +397,7 @@ class ZTAEncryption {
                         }
                         
                         // Initialize encryption if needed
-                        if (!self.initialized) {
-                            await self.init();
-                        }
+                        await self.ensureInitialized();
                     } catch (error) {
                         console.warn('Could not attach security headers:', error);
                     }
@@ -380,20 +414,24 @@ class ZTAEncryption {
 class ZTAAutomatedSetup {
     constructor() {
         this.dbName = 'ZTA_Certificates';
-        this.dbVersion = 2; // Increased version for updates
+        this.dbVersion = 2;
         this.db = null;
         this.currentUserId = null;
+        this.initPromise = null;
     }
     
     async initDB() {
-        return new Promise((resolve, reject) => {
+        if (this.initPromise) {
+            return this.initPromise;
+        }
+        
+        this.initPromise = new Promise((resolve, reject) => {
             const request = indexedDB.open(this.dbName, this.dbVersion);
             
             request.onupgradeneeded = (event) => {
                 const db = event.target.result;
                 const oldVersion = event.oldVersion;
                 
-                // Create or update object stores
                 if (!db.objectStoreNames.contains('certificates')) {
                     const store = db.createObjectStore('certificates', { keyPath: 'id' });
                     store.createIndex('userId', 'userId', { unique: false });
@@ -405,7 +443,6 @@ class ZTAAutomatedSetup {
                     store.createIndex('userId', 'userId', { unique: true });
                 }
                 
-                // Add token store in version 2
                 if (oldVersion < 2) {
                     if (!db.objectStoreNames.contains('tokens')) {
                         const store = db.createObjectStore('tokens', { keyPath: 'type' });
@@ -423,9 +460,13 @@ class ZTAAutomatedSetup {
                 reject('Failed to open IndexedDB');
             };
         });
+        
+        return this.initPromise;
     }
     
     async generateRSAKeyPair(userId = null) {
+        await this.initDB();
+        
         try {
             console.log('Generating RSA key pair...');
             
@@ -448,7 +489,7 @@ class ZTAAutomatedSetup {
             
             await this.storeKeyPair(publicKeyPem, privateKeyPem, userId);
             
-            console.log('RSA key pair generated successfully');
+            console.log('✅ RSA key pair generated successfully');
             return {
                 publicKey: publicKeyPem,
                 publicKeyArray: publicKey,
@@ -457,7 +498,7 @@ class ZTAAutomatedSetup {
             };
             
         } catch (error) {
-            console.error('RSA key generation failed:', error);
+            console.error('❌ RSA key generation failed:', error);
             throw error;
         }
     }
@@ -476,6 +517,8 @@ class ZTAAutomatedSetup {
     }
     
     async storeKeyPair(publicKeyPem, privateKeyPem, userId = null) {
+        await this.initDB();
+        
         return new Promise((resolve, reject) => {
             const transaction = this.db.transaction(['rsa_keys'], 'readwrite');
             const store = transaction.objectStore('rsa_keys');
@@ -492,7 +535,7 @@ class ZTAAutomatedSetup {
             const request = store.put(keyData);
             
             request.onsuccess = () => {
-                console.log('RSA key pair stored in IndexedDB');
+                console.log('✅ RSA key pair stored in IndexedDB');
                 resolve();
             };
             
@@ -503,6 +546,8 @@ class ZTAAutomatedSetup {
     }
     
     async getStoredKeyPair() {
+        await this.initDB();
+        
         return new Promise((resolve, reject) => {
             const transaction = this.db.transaction(['rsa_keys'], 'readonly');
             const store = transaction.objectStore('rsa_keys');
@@ -519,7 +564,6 @@ class ZTAAutomatedSetup {
     }
     
     async generateCSR(publicKeyPem, userInfo) {
-        // Simplified CSR for now - in production use proper PKCS#10
         const csrData = {
             publicKey: publicKeyPem,
             subject: {
@@ -537,6 +581,8 @@ class ZTAAutomatedSetup {
     }
     
     async storeCertificate(certPem, userId) {
+        await this.initDB();
+        
         return new Promise((resolve, reject) => {
             const transaction = this.db.transaction(['certificates'], 'readwrite');
             const store = transaction.objectStore('certificates');
@@ -554,7 +600,7 @@ class ZTAAutomatedSetup {
             const request = store.put(certData);
             
             request.onsuccess = () => {
-                console.log('Certificate stored in IndexedDB');
+                console.log('✅ Certificate stored in IndexedDB');
                 resolve(certData);
             };
             
@@ -565,13 +611,11 @@ class ZTAAutomatedSetup {
     }
     
     calculateFingerprintSimple(certPem) {
-        // Simple SHA-256 fingerprint (for demo - not cryptographically secure)
         const certBody = certPem
             .replace(/-----BEGIN CERTIFICATE-----/, '')
             .replace(/-----END CERTIFICATE-----/, '')
             .replace(/\s/g, '');
         
-        // Simple hash for demo
         let hash = 0;
         for (let i = 0; i < certBody.length; i++) {
             const char = certBody.charCodeAt(i);
@@ -583,21 +627,15 @@ class ZTAAutomatedSetup {
     }
     
     async attachCertificateToRequest(headers = {}) {
+        await this.initDB();
+        
         try {
-            if (!this.db) {
-                await this.initDB();
-            }
-            
             const cert = await this.getCurrentCertificate();
             if (cert && cert.certificate) {
-                // Attach as base64
                 const certBase64 = btoa(cert.certificate);
                 headers['X-Client-Certificate'] = certBase64;
-                
-                // Also add fingerprint for verification
                 headers['X-Certificate-Fingerprint'] = cert.fingerprint;
             }
-            
             return headers;
         } catch (error) {
             console.warn('Could not attach certificate:', error);
@@ -606,6 +644,8 @@ class ZTAAutomatedSetup {
     }
     
     async getCurrentCertificate() {
+        await this.initDB();
+        
         return new Promise((resolve, reject) => {
             const transaction = this.db.transaction(['certificates'], 'readonly');
             const store = transaction.objectStore('certificates');
@@ -624,6 +664,8 @@ class ZTAAutomatedSetup {
     }
     
     async storeToken(tokenType, tokenValue) {
+        await this.initDB();
+        
         return new Promise((resolve, reject) => {
             const transaction = this.db.transaction(['tokens'], 'readwrite');
             const store = transaction.objectStore('tokens');
@@ -642,6 +684,8 @@ class ZTAAutomatedSetup {
     }
     
     async getToken(tokenType) {
+        await this.initDB();
+        
         return new Promise((resolve, reject) => {
             const transaction = this.db.transaction(['tokens'], 'readonly');
             const store = transaction.objectStore('tokens');
@@ -658,22 +702,20 @@ class ZTAAutomatedSetup {
         console.log('Current user ID set:', userId);
     }
     
-    // Automated registration helper
     async automatedRegistration(formData) {
+        await this.initDB();
+        
         try {
             console.log('Starting automated registration...');
             
-            // 1. Generate RSA keys
             const keyPair = await this.generateRSAKeyPair();
             
-            // 2. Create CSR
             const csrData = await this.generateCSR(keyPair.publicKey, {
                 email: formData.email,
                 department: formData.department || 'Operations',
                 username: formData.username
             });
             
-            // 3. Send to server
             const response = await fetch('/api/registration/automated', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -687,10 +729,7 @@ class ZTAAutomatedSetup {
             const result = await response.json();
             
             if (result.success) {
-                // 4. Store certificate
                 await this.storeCertificate(result.certificate, result.user_id);
-                
-                // 5. Update key pair with user ID
                 await this.storeKeyPair(keyPair.publicKey, keyPair.privateKey, result.user_id);
                 this.setCurrentUserId(result.user_id);
                 
@@ -717,93 +756,8 @@ class ZTAAutomatedSetup {
 window.ztaAutomatedSetup = new ZTAAutomatedSetup();
 window.ztaEncryptor = new ZTAEncryption();
 
-// Auto-initialize when page loads
-document.addEventListener('DOMContentLoaded', async () => {
-    // Wait for ztaEncryptor to be available (retry up to 5 times)
-    let retries = 0;
-    const maxRetries = 5;
-    
-    while (!window.ztaEncryptor && retries < maxRetries) {
-        console.log(`Waiting for ztaEncryptor... (${retries + 1}/${maxRetries})`);
-        await new Promise(resolve => setTimeout(resolve, 500));
-        retries++;
-    }
-    
-    if (!window.ztaEncryptor) {
-        console.error('❌ ztaEncryptor failed to load after 5 retries');
-        showError('Security module failed to load - please refresh the page');
-        return;
-    }
-    
-    console.log('✅ ztaEncryptor loaded successfully');
-    
-    // Initialize encryption
-    try {
-        await window.ztaEncryptor.init();
-        console.log('✅ Encryption initialized');
-    } catch (error) {
-        console.error('❌ Encryption init failed:', error);
-    }
-    
-    // Check if we have a stored encrypted response
-    const storedResourceId = sessionStorage.getItem('current_resource_id');
-    const storedResponse = sessionStorage.getItem('encrypted_response');
-    
-    if (storedResourceId && storedResponse && parseInt(storedResourceId) === resourceId) {
-        console.log('✅ Using stored encrypted response');
-        sessionStorage.removeItem('current_resource_id');
-        sessionStorage.removeItem('encrypted_response');
-        
-        const result = JSON.parse(storedResponse);
-        updateStep(1, 'completed', 'JWT verified');
-        updateStep(2, 'completed', 'Request encrypted');
-        updateStep(3, 'completed', 'Policy evaluation');
-        updateStep(4, 'completed', 'Resource fetched');
-        
-        await decryptAndDisplay(result.encrypted_response);
-    } else {
-        console.log('⚠️ No stored response, fetching fresh...');
-        setTimeout(fetchResourceThroughOPA, 300);
-    }
-});
-
 // Export for module systems (if needed)
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = { ZTAEncryption, ZTAAutomatedSetup };
 }
-
-// Ensure ZTA encryption is available for resource viewing
-window.addEventListener('load', async () => {
-    try {
-        // Initialize if not already done
-        if (window.ztaEncryptor && !window.ztaEncryptor.initialized) {
-            await window.ztaEncryptor.init();
-        }
-        
-        if (window.ztaAutomatedSetup && !window.ztaAutomatedSetup.db) {
-            await window.ztaAutomatedSetup.initDB();
-        }
-        
-        console.log('✅ ZTA Security ready for resource viewing');
-    } catch (error) {
-        console.warn('ZTA initialization warning:', error);
-        // Continue anyway - system can work without encryption
-    }
-});
-
-// Helper function for resource decryption
-window.decryptResourceResponse = async function(encryptedPayload) {
-    if (!window.ztaEncryptor || !window.ztaEncryptor.initialized) {
-        throw new Error('ZTA encryption not initialized');
-    }
-    
-    try {
-        const decrypted = await window.ztaEncryptor.decryptFromAgent(encryptedPayload);
-        return decrypted;
-    } catch (error) {
-        console.error('Resource decryption failed:', error);
-        throw error;
-    }
-
-};
 

@@ -2,6 +2,10 @@
 
 {% block title %}Resource Portal - Government ZTA System{% endblock %}
 
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/zta-encryption.js') }}"></script>
+{% endblock %}
+
 {% block extra_css %}
 <style>
     .portal-header {
@@ -189,6 +193,36 @@ let filters = {
 // Load resource portal
 async function loadResourcePortal() {
     try {
+        // Wait for ztaEncryptor to be available
+        let retries = 0;
+        const maxRetries = 10;
+        
+        while (!window.ztaEncryptor && retries < maxRetries) {
+            console.log(`Waiting for ztaEncryptor... (${retries + 1}/${maxRetries})`);
+            await new Promise(resolve => setTimeout(resolve, 500));
+            retries++;
+        }
+        
+        if (!window.ztaEncryptor) {
+            console.error('❌ ztaEncryptor failed to load');
+            document.getElementById('resourcePortal').innerHTML = `
+                <div style="background: #f8d7da; color: #721c24; padding: 2rem; border-radius: 5px;">
+                    <h3>❌ Security Module Failed to Load</h3>
+                    <p>The encryption module could not be loaded. Please refresh the page.</p>
+                    <button onclick="window.location.reload()" class="btn btn-primary">Refresh</button>
+                </div>
+            `;
+            return;
+        }
+        
+        // Initialize encryption
+        try {
+            await window.ztaEncryptor.init();
+            console.log('✅ Encryption initialized');
+        } catch (error) {
+            console.error('❌ Encryption init failed:', error);
+        }
+        
         const token = localStorage.getItem('access_token');
         
         if (!token) {
@@ -232,11 +266,12 @@ async function loadResourcePortal() {
             <div style="background: #f8d7da; color: #721c24; padding: 2rem; border-radius: 5px;">
                 <h3>Error Loading Resource Portal</h3>
                 <p>${error.message}</p>
-                <button onclick="window.location.href='/dashboard'">Back to Dashboard</button>
+                <button onclick="window.location.href='/dashboard'" class="btn btn-primary">Back to Dashboard</button>
             </div>
         `;
     }
 }
+
 
 // ========== ADD THIS FUNCTION RIGHT HERE ==========
 async function loadResources() {
@@ -702,7 +737,23 @@ function showResourceModal(resourceId, encryptedResponse) {
     // Decrypt and display in modal
     (async () => {
         try {
+            // Ensure encryption is initialized
+            if (!window.ztaEncryptor) {
+                throw new Error('ZTA encryption not loaded');
+            }
+            
+            if (!window.ztaEncryptor.initialized) {
+                console.log('Waiting for encryption initialization...');
+                await window.ztaEncryptor.init();
+            }
+            
+            if (!window.ztaEncryptor.initialized) {
+                throw new Error('Encryption initialization failed');
+            }
+            
+            console.log('🔐 Attempting to decrypt resource...');
             const decrypted = await window.ztaEncryptor.decryptFromAgent(encryptedResponse);
+            console.log('✅ Decryption successful:', decrypted);
             
             if (!decrypted.allowed) {
                 throw new Error(decrypted.reason || 'Access denied');
@@ -711,9 +762,12 @@ function showResourceModal(resourceId, encryptedResponse) {
             let resourceData = null;
             if (decrypted.api_response && decrypted.api_response.data) {
                 resourceData = decrypted.api_response.data;
+            } else if (decrypted.id || decrypted.name) {
+                resourceData = decrypted;
             }
             
             if (!resourceData) {
+                console.error('❌ Could not find resource data in response:', decrypted);
                 throw new Error('No resource data found');
             }
             
@@ -724,17 +778,30 @@ function showResourceModal(resourceId, encryptedResponse) {
                 <p><strong>Classification:</strong> ${escapeHtml(resourceData.tier || resourceData.classification || 'Unknown')}</p>
                 <hr>
                 <p>${escapeHtml(resourceData.content || 'No content available')}</p>
+                <div class="mt-3 text-muted small">
+                    <strong>ZTA Context:</strong> End-to-end encrypted | Trace ID: ${escapeHtml(traceId)}
+                </div>
             `;
             
         } catch (error) {
+            console.error('❌ Modal decryption error:', error);
             document.getElementById('modal-content').innerHTML = `
                 <div class="alert alert-danger">
-                    <h4>Error</h4>
+                    <h4>❌ Access Denied</h4>
                     <p>${error.message}</p>
+                    <button onclick="document.getElementById('resource-modal').remove()" class="btn btn-secondary mt-2">Close</button>
                 </div>
             `;
         }
     })();
+}
+
+// Add escapeHtml function if not present
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 
