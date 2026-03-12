@@ -1,17 +1,17 @@
 // FINAL FIXED VERSION: app/static/js/zta-encryption.js
 console.log('🔐 zta-encryption.js loaded at:', new Date().toISOString());
+
 class ZTAEncryption {
     constructor() {
         this.agentPublicKey = null;
         this.userPrivateKey = null;
         this.userPublicKey = null;
         this.initialized = false;
-        this.initPromise = null; // Add promise to track initialization
+        this.initPromise = null;
         this.setup = window.ztaAutomatedSetup;
     }
     
     async init() {
-        // Prevent multiple simultaneous initializations
         if (this.initPromise) {
             return this.initPromise;
         }
@@ -24,12 +24,11 @@ class ZTAEncryption {
         try {
             console.log('Initializing ZTA encryption...');
             
-            // Initialize IndexedDB through automated setup first
             if (this.setup) {
                 await this.setup.initDB();
             }
             
-            // 1. Get OPA Agent public key - NO AUTH REQUIRED
+            // 1. Get OPA Agent public key
             try {
                 const agentKeyResponse = await fetch('/api/opa-agent-public-key');
                 
@@ -79,217 +78,53 @@ class ZTAEncryption {
         return true;
     }
     
-    async encryptForAgent(data) {
-        await this.ensureInitialized();
+    // ========== BASE64 HELPER FUNCTIONS ==========
+    
+    cleanBase64(base64) {
+        if (!base64) return base64;
         
-        if (!this.agentPublicKey) {
-            throw new Error('OPA Agent public key not available');
+        // Remove any whitespace (spaces, newlines, tabs)
+        base64 = base64.replace(/\s/g, '');
+        
+        // Replace URL-safe characters if present
+        base64 = base64.replace(/-/g, '+').replace(/_/g, '/');
+        
+        // Add padding if needed
+        while (base64.length % 4) {
+            base64 += '=';
         }
         
+        return base64;
+    }
+    
+    base64ToArrayBuffer(base64) {
         try {
-            // Convert data to JSON string
-            const jsonString = JSON.stringify(data);
+            // Clean the base64 string first
+            const cleanedBase64 = this.cleanBase64(base64);
             
-            // Import OPA Agent's public key
-            const publicKey = await this.importPublicKey(this.agentPublicKey);
-            
-            // Encrypt with RSA-OAEP
-            const encoder = new TextEncoder();
-            const encoded = encoder.encode(jsonString);
-            
-            // Note: Web Crypto API has size limitations for RSA (max ~190 bytes)
-            // For larger data, we need to use hybrid encryption
-            if (encoded.length > 190) {
-                return await this.hybridEncrypt(data);
+            // Try to decode
+            const binaryString = atob(cleanedBase64);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
             }
-            
-            const encrypted = await window.crypto.subtle.encrypt(
-                {
-                    name: "RSA-OAEP"
-                },
-                publicKey,
-                encoded
-            );
-            
-            // Convert to base64
-            return this.arrayBufferToBase64(encrypted);
-            
+            return bytes.buffer;
         } catch (error) {
-            console.error('Encryption failed:', error);
-            throw error;
+            console.error('❌ Base64 decode failed:', error);
+            throw new Error(`Base64 decode failed: ${error.message}`);
         }
     }
     
-    async hybridEncrypt(data) {
-        // Hybrid encryption: RSA for key, AES for data
-        const jsonString = JSON.stringify(data);
-        const encoder = new TextEncoder();
-        const dataBytes = encoder.encode(jsonString);
-        
-        // Generate random AES key
-        const aesKey = await window.crypto.subtle.generateKey(
-            { name: "AES-GCM", length: 256 },
-            true,
-            ["encrypt", "decrypt"]
-        );
-        
-        // Encrypt data with AES
-        const iv = window.crypto.getRandomValues(new Uint8Array(12));
-        const encryptedData = await window.crypto.subtle.encrypt(
-            { name: "AES-GCM", iv: iv },
-            aesKey,
-            dataBytes
-        );
-        
-        // Export AES key
-        const exportedAesKey = await window.crypto.subtle.exportKey("raw", aesKey);
-        
-        // Encrypt AES key with RSA
-        const agentPublicKey = await this.importPublicKey(this.agentPublicKey);
-        const encryptedKey = await window.crypto.subtle.encrypt(
-            { name: "RSA-OAEP" },
-            agentPublicKey,
-            exportedAesKey
-        );
-        
-        return JSON.stringify({
-            encrypted_key: this.arrayBufferToBase64(encryptedKey),
-            encrypted_data: this.arrayBufferToBase64(encryptedData),
-            iv: this.arrayBufferToBase64(iv),
-            algorithm: "RSA-AES-HYBRID"
-        });
+    arrayBufferToBase64(buffer) {
+        const bytes = new Uint8Array(buffer);
+        let binary = '';
+        for (let i = 0; i < bytes.byteLength; i++) {
+            binary += String.fromCharCode(bytes[i]);
+        }
+        return btoa(binary);
     }
     
-    async decryptFromAgent(encryptedData) {
-        await this.ensureInitialized();
-        
-        if (!this.userPrivateKey) {
-            // Try one more time to load from IndexedDB
-            if (this.setup) {
-                try {
-                    const keyPair = await this.setup.getStoredKeyPair();
-                    if (keyPair && keyPair.privateKey) {
-                        this.userPrivateKey = keyPair.privateKey;
-                        this.userPublicKey = keyPair.publicKey;
-                        console.log('✅ Loaded private key on demand from IndexedDB');
-                    }
-                } catch (error) {
-                    console.error('Failed to load private key on demand:', error);
-                }
-            }
-            
-            if (!this.userPrivateKey) {
-                throw new Error('User private key not available');
-            }
-        }
-        
-        try {
-            // Check if it's hybrid encrypted (from backend)
-            if (typeof encryptedData === 'string') {
-                // Try to parse as JSON to check for hybrid format
-                try {
-                    const parsed = JSON.parse(encryptedData);
-                    // Backend hybrid format has 'type' field
-                    if (parsed.type === 'hybrid') {
-                        console.log('🔐 Detected backend hybrid encryption');
-                        return await this.hybridDecryptBackend(parsed);
-                    }
-                    // Frontend hybrid format has 'algorithm' field
-                    if (parsed.algorithm === "RSA-AES-HYBRID") {
-                        return await this.hybridDecrypt(parsed);
-                    }
-                } catch {
-                    // Not JSON, continue with regular RSA
-                }
-            }
-            
-            // Regular RSA decryption
-            console.log('🔐 Using direct RSA decryption');
-            const privateKey = await this.importPrivateKey(this.userPrivateKey);
-            const encrypted = this.base64ToArrayBuffer(encryptedData);
-            
-            const decrypted = await window.crypto.subtle.decrypt(
-                { name: "RSA-OAEP" },
-                privateKey,
-                encrypted
-            );
-            
-            const decoder = new TextDecoder();
-            return JSON.parse(decoder.decode(decrypted));
-            
-        } catch (error) {
-            console.error('Decryption failed:', error);
-            throw error;
-        }
-    }
-
-    async hybridDecryptBackend(encryptedPackage) {
-        const privateKey = await this.importPrivateKey(this.userPrivateKey);
-        
-        // Decrypt AES key with RSA
-        const encryptedKey = this.base64ToArrayBuffer(encryptedPackage.encrypted_key);
-        const exportedAesKey = await window.crypto.subtle.decrypt(
-            { name: "RSA-OAEP" },
-            privateKey,
-            encryptedKey
-        );
-        
-        // Import AES key
-        const aesKey = await window.crypto.subtle.importKey(
-            "raw",
-            exportedAesKey,
-            { name: "AES-GCM", length: 256 },
-            true,
-            ["decrypt"]
-        );
-        
-        // Decrypt data with AES
-        const iv = this.base64ToArrayBuffer(encryptedPackage.iv);
-        const encryptedData = this.base64ToArrayBuffer(encryptedPackage.encrypted_data);
-        
-        const decryptedData = await window.crypto.subtle.decrypt(
-            { name: "AES-GCM", iv: iv },
-            aesKey,
-            encryptedData
-        );
-        
-        const decoder = new TextDecoder();
-        return JSON.parse(decoder.decode(decryptedData));
-    }
-    
-    async hybridDecrypt(encryptedPackage) {
-        const privateKey = await this.importPrivateKey(this.userPrivateKey);
-        
-        // Decrypt AES key with RSA
-        const encryptedKey = this.base64ToArrayBuffer(encryptedPackage.encrypted_key);
-        const exportedAesKey = await window.crypto.subtle.decrypt(
-            { name: "RSA-OAEP" },
-            privateKey,
-            encryptedKey
-        );
-        
-        // Import AES key
-        const aesKey = await window.crypto.subtle.importKey(
-            "raw",
-            exportedAesKey,
-            { name: "AES-GCM", length: 256 },
-            true,
-            ["decrypt"]
-        );
-        
-        // Decrypt data with AES
-        const iv = this.base64ToArrayBuffer(encryptedPackage.iv);
-        const encryptedData = this.base64ToArrayBuffer(encryptedPackage.encrypted_data);
-        
-        const decryptedData = await window.crypto.subtle.decrypt(
-            { name: "AES-GCM", iv: iv },
-            aesKey,
-            encryptedData
-        );
-        
-        const decoder = new TextDecoder();
-        return JSON.parse(decoder.decode(decryptedData));
-    }
+    // ========== KEY IMPORT FUNCTIONS ==========
     
     async importPublicKey(pem) {
         const pemHeader = "-----BEGIN PUBLIC KEY-----";
@@ -321,28 +156,243 @@ class ZTAEncryption {
         );
     }
     
-    base64ToArrayBuffer(base64) {
-        const binaryString = atob(base64);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-            bytes[i] = binaryString.charCodeAt(i);
+    // ========== ENCRYPTION FUNCTIONS ==========
+    
+    async encryptForAgent(data) {
+        await this.ensureInitialized();
+        
+        if (!this.agentPublicKey) {
+            throw new Error('OPA Agent public key not available');
         }
-        return bytes.buffer;
+        
+        try {
+            const jsonString = JSON.stringify(data);
+            const publicKey = await this.importPublicKey(this.agentPublicKey);
+            const encoder = new TextEncoder();
+            const encoded = encoder.encode(jsonString);
+            
+            if (encoded.length > 190) {
+                return await this.hybridEncrypt(data);
+            }
+            
+            const encrypted = await window.crypto.subtle.encrypt(
+                { name: "RSA-OAEP" },
+                publicKey,
+                encoded
+            );
+            
+            return this.arrayBufferToBase64(encrypted);
+            
+        } catch (error) {
+            console.error('Encryption failed:', error);
+            throw error;
+        }
     }
     
-    arrayBufferToBase64(buffer) {
-        const bytes = new Uint8Array(buffer);
-        let binary = '';
-        for (let i = 0; i < bytes.byteLength; i++) {
-            binary += String.fromCharCode(bytes[i]);
+    async hybridEncrypt(data) {
+        const jsonString = JSON.stringify(data);
+        const encoder = new TextEncoder();
+        const dataBytes = encoder.encode(jsonString);
+        
+        const aesKey = await window.crypto.subtle.generateKey(
+            { name: "AES-GCM", length: 256 },
+            true,
+            ["encrypt", "decrypt"]
+        );
+        
+        const iv = window.crypto.getRandomValues(new Uint8Array(12));
+        const encryptedData = await window.crypto.subtle.encrypt(
+            { name: "AES-GCM", iv: iv },
+            aesKey,
+            dataBytes
+        );
+        
+        const exportedAesKey = await window.crypto.subtle.exportKey("raw", aesKey);
+        const agentPublicKey = await this.importPublicKey(this.agentPublicKey);
+        const encryptedKey = await window.crypto.subtle.encrypt(
+            { name: "RSA-OAEP" },
+            agentPublicKey,
+            exportedAesKey
+        );
+        
+        return JSON.stringify({
+            encrypted_key: this.arrayBufferToBase64(encryptedKey),
+            encrypted_data: this.arrayBufferToBase64(encryptedData),
+            iv: this.arrayBufferToBase64(iv),
+            algorithm: "RSA-AES-HYBRID"
+        });
+    }
+    
+    // ========== DECRYPTION FUNCTIONS ==========
+    
+    async decryptFromAgent(encryptedData) {
+        await this.ensureInitialized();
+        
+        if (!this.userPrivateKey) {
+            if (this.setup) {
+                try {
+                    const keyPair = await this.setup.getStoredKeyPair();
+                    if (keyPair && keyPair.privateKey) {
+                        this.userPrivateKey = keyPair.privateKey;
+                        this.userPublicKey = keyPair.publicKey;
+                        console.log('✅ Loaded private key on demand from IndexedDB');
+                    }
+                } catch (error) {
+                    console.error('Failed to load private key on demand:', error);
+                }
+            }
+            
+            if (!this.userPrivateKey) {
+                throw new Error('User private key not available - ACCESS DENIED');
+            }
         }
-        return btoa(binary);
+        
+        try {
+            // encryptedData should ALWAYS be a string
+            if (typeof encryptedData !== 'string') {
+                throw new Error('Encrypted data must be a string');
+            }
+            
+            // Parse the JSON
+            let parsed;
+            try {
+                parsed = JSON.parse(encryptedData);
+            } catch (parseError) {
+                console.error('❌ Failed to parse encrypted data as JSON:', parseError);
+                throw new Error('Invalid encryption format - expected JSON');
+            }
+            
+            // Check for backend hybrid format
+            if (parsed.type === 'hybrid') {
+                console.log('🔐 Detected backend hybrid encryption');
+                return await this.hybridDecryptBackend(parsed);
+            }
+            
+            // Check for frontend hybrid format
+            if (parsed.algorithm === "RSA-AES-HYBRID") {
+                console.log('🔐 Detected frontend hybrid encryption');
+                return await this.hybridDecrypt(parsed);
+            }
+            
+            throw new Error('Unknown encryption format');
+            
+        } catch (error) {
+            console.error('❌ Decryption failed:', error);
+            throw error;
+        }
+    }
+    
+    async hybridDecryptBackend(encryptedPackage) {
+        console.log('🔍 Hybrid decrypt - package keys:', Object.keys(encryptedPackage));
+        
+        try {
+            const privateKey = await this.importPrivateKey(this.userPrivateKey);
+            
+            // Decrypt AES key with RSA
+            console.log('🔍 Decoding encrypted_key...');
+            const encryptedKey = this.base64ToArrayBuffer(encryptedPackage.encrypted_key);
+            console.log('✅ encrypted_key decoded, length:', encryptedKey.byteLength);
+            
+            const aesKeyRaw = await window.crypto.subtle.decrypt(
+                { name: "RSA-OAEP" },
+                privateKey,
+                encryptedKey
+            );
+            console.log('✅ AES key decrypted, length:', aesKeyRaw.byteLength);
+            
+            // Import AES key
+            const aesKey = await window.crypto.subtle.importKey(
+                "raw",
+                aesKeyRaw,
+                { name: "AES-GCM", length: 256 },
+                true,
+                ["decrypt"]
+            );
+            console.log('✅ AES key imported');
+            
+            // Decode IV
+            console.log('🔍 Decoding IV...');
+            const iv = this.base64ToArrayBuffer(encryptedPackage.iv);
+            console.log('✅ IV decoded, length:', iv.byteLength);
+            
+            // Decode encrypted data (which already includes the tag at the end)
+            console.log('🔍 Decoding encrypted_data...');
+            const encryptedDataWithTag = this.base64ToArrayBuffer(encryptedPackage.encrypted_data);
+            console.log('✅ encrypted_data decoded, length:', encryptedDataWithTag.byteLength);
+            
+            // For Web Crypto API, we pass the ENTIRE encrypted data including the tag
+            // The API knows that the last 16 bytes are the tag
+            console.log('🔍 Performing AES-GCM decryption with combined data...');
+            const decryptedData = await window.crypto.subtle.decrypt(
+                {
+                    name: "AES-GCM",
+                    iv: iv,
+                    additionalData: null,
+                    tagLength: 128  // 16 bytes * 8 = 128 bits
+                },
+                aesKey,
+                encryptedDataWithTag  // Pass the combined data (encrypted data + tag)
+            );
+            
+            console.log('✅ AES decryption successful, length:', decryptedData.byteLength);
+            
+            const decoder = new TextDecoder();
+            const resultStr = decoder.decode(decryptedData);
+            console.log('✅ Decoded text length:', resultStr.length);
+            
+            const result = JSON.parse(resultStr);
+            console.log('✅ JSON parsed successfully');
+            return result;
+            
+        } catch (error) {
+            console.error('❌ Hybrid decrypt failed:', error);
+            console.error('Error name:', error.name);
+            console.error('Error message:', error.message);
+            throw error;
+        }
+    }
+    
+    async hybridDecrypt(encryptedPackage) {
+        try {
+            const privateKey = await this.importPrivateKey(this.userPrivateKey);
+            
+            const encryptedKey = this.base64ToArrayBuffer(encryptedPackage.encrypted_key);
+            const exportedAesKey = await window.crypto.subtle.decrypt(
+                { name: "RSA-OAEP" },
+                privateKey,
+                encryptedKey
+            );
+            
+            const aesKey = await window.crypto.subtle.importKey(
+                "raw",
+                exportedAesKey,
+                { name: "AES-GCM", length: 256 },
+                true,
+                ["decrypt"]
+            );
+            
+            const iv = this.base64ToArrayBuffer(encryptedPackage.iv);
+            const encryptedData = this.base64ToArrayBuffer(encryptedPackage.encrypted_data);
+            
+            const decryptedData = await window.crypto.subtle.decrypt(
+                { name: "AES-GCM", iv: iv },
+                aesKey,
+                encryptedData
+            );
+            
+            const decoder = new TextDecoder();
+            const result = JSON.parse(decoder.decode(decryptedData));
+            return result;
+            
+        } catch (error) {
+            console.error('❌ Frontend hybrid decrypt failed:', error);
+            throw error;
+        }
     }
     
     async sendEncryptedRequest(endpoint, method = 'GET', data = null) {
         await this.ensureInitialized();
         
-        // Attach certificate if we have automated setup
         let headers = { 'Content-Type': 'application/json' };
         if (this.setup) {
             headers = await this.setup.attachCertificateToRequest(headers);
@@ -379,24 +429,19 @@ class ZTAEncryption {
         }
     }
     
-    // Helper to automatically attach security to all fetches
     async enableAutoSecurity() {
         const originalFetch = window.fetch;
         const self = this;
         
         window.fetch = async function(url, options = {}) {
-            // Only modify requests to our API
             if (typeof url === 'string' && url.includes('/api/')) {
-                // Skip registration endpoints
                 if (!url.includes('/api/registration') && !url.includes('/api/auth/login')) {
                     try {
-                        // Attach certificate
                         if (self.setup) {
                             options.headers = options.headers || {};
                             await self.setup.attachCertificateToRequest(options.headers);
                         }
                         
-                        // Initialize encryption if needed
                         await self.ensureInitialized();
                     } catch (error) {
                         console.warn('Could not attach security headers:', error);
@@ -760,4 +805,3 @@ window.ztaEncryptor = new ZTAEncryption();
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = { ZTAEncryption, ZTAAutomatedSetup };
 }
-

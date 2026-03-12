@@ -59,22 +59,23 @@ class CryptoHandler:
             ),
         )
 
-        # Package everything
+        # Package everything - APPEND TAG TO DATA for client compatibility
+        # AND ensure clean base64 (no newlines)
         result = {
             "type": "hybrid",
-            "encrypted_key": base64.b64encode(encrypted_key).decode("utf-8"),
-            "encrypted_data": base64.b64encode(encrypted_data).decode("utf-8"),
-            "iv": base64.b64encode(iv).decode("utf-8"),
-            "tag": base64.b64encode(tag).decode("utf-8"),
+            "encrypted_key": base64.b64encode(encrypted_key).decode("utf-8").strip(),
+            "encrypted_data": base64.b64encode(encrypted_data + tag).decode("utf-8").strip(),  # Tag appended
+            "iv": base64.b64encode(iv).decode("utf-8").strip(),
             "algorithm": "RSA-OAEP-SHA256 + AES-256-GCM",
         }
 
-        return json.dumps(result)
+        # Return as JSON string - this will be the final encrypted response
+        return json.dumps(result, separators=(',', ':'))  # Compact JSON
 
     def encrypt_for_user(self, data, user_public_key_pem):
         """Encrypt data with user's public key - with hybrid encryption"""
         try:
-            # Convert data to bytes
+            # Convert data to bytes - handle both dict and str
             if isinstance(data, dict):
                 data_str = json.dumps(data)
             elif isinstance(data, str):
@@ -150,7 +151,6 @@ class CryptoHandler:
         except Exception as e:
             print(f"❌ Encryption error: {e}")
             import traceback
-
             traceback.print_exc()
             raise
 
@@ -206,9 +206,13 @@ class CryptoHandler:
 
         # Decode components
         encrypted_key = base64.b64decode(package["encrypted_key"])
-        encrypted_data = base64.b64decode(package["encrypted_data"])
+        
+        # IMPORTANT: The encrypted_data includes the tag at the end (last 16 bytes)
+        combined_data = base64.b64decode(package["encrypted_data"])
+        tag = combined_data[-16:]  # Last 16 bytes are the tag
+        encrypted_data = combined_data[:-16]  # Rest is the actual encrypted data
+        
         iv = base64.b64decode(package["iv"])
-        tag = base64.b64decode(package["tag"])
 
         # Decrypt AES key with RSA
         aes_key = private_key.decrypt(
@@ -229,6 +233,7 @@ class CryptoHandler:
 
         print(f"✅ Hybrid decrypt successful: {len(decrypted_data)} bytes")
         return decrypted_data.decode()
+
 
     def _try_fix_pem_format(self, key_str):
         """Try to fix PEM format by ensuring proper headers and line breaks"""

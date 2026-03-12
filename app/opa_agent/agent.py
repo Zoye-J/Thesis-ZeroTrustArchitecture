@@ -164,7 +164,9 @@ class OpaAgent:
     def encrypt_response(self, data, user_public_key):
         """Encrypt response for specific user"""
         try:
-            return self.crypto.encrypt_for_user(json.dumps(data), user_public_key)
+            # data is already a dict, don't json.dumps it here
+            # Let encrypt_for_user handle the serialization
+            return self.crypto.encrypt_for_user(data, user_public_key)
         except Exception as e:
             logger.error(f"Failed to encrypt response: {e}")
             raise
@@ -220,12 +222,11 @@ class OpaAgent:
         """Call API Server after OPA approval"""
         try:
             # Extract the actual API endpoint and method
-            endpoint = request_info.get("endpoint")  # ← NO FALLBACK
+            endpoint = request_info.get("endpoint")
             method = request_info.get("method", "GET").upper()
             data = request_info.get("data")
             user_claims = request_info.get("user", {})
 
-            # CRITICAL: If no endpoint, this is an error - DENY ACCESS
             if not endpoint:
                 logger.error("No endpoint provided in request_info - DENYING ACCESS")
                 return {
@@ -236,65 +237,55 @@ class OpaAgent:
 
             logger.info(f"Calling API Server: {method} {endpoint}")
 
-            # Prepare headers for API Server - USE THE CORRECT SERVICE TOKEN
+            # Prepare headers for API Server
             headers = {
                 "Content-Type": "application/json",
-                "X-Service-Token": "api-token-2024-zta",  # ← MUST match api_server.py
+                "X-Service-Token": "api-token-2024-zta",
                 "X-Request-ID": request_info.get("request_id", "unknown"),
                 "X-User-Claims": json.dumps(user_claims),
                 "X-Forwarded-By": "OPA-Agent",
+                "Connection": "keep-alive",  # Add keep-alive
             }
 
-            # Log the headers (without sensitive data)
-            logger.info(
-                f"Request headers: X-Service-Token present, X-Request-ID: {headers['X-Request-ID']}"
-            )
+            # Use a session with connection pooling (reuse the same session)
+            if not hasattr(self, "_api_session"):
+                from app.ssl_fix import get_ssl_fixed_session
 
-            # Use SSL-fixed session
-            from app.ssl_fix import get_ssl_fixed_session
-
-            session = get_ssl_fixed_session()
+                self._api_session = get_ssl_fixed_session()
 
             # Make the request to API Server
             url = f"{self.api_server_url}{endpoint}"
             logger.info(f"Making request to: {url}")
 
+            # Use the cached session
             if method == "POST":
-                response = session.post(
+                response = self._api_session.post(
                     url,
                     json=data,
                     headers=headers,
                     timeout=10,
                 )
             elif method == "PUT":
-                response = session.put(
+                response = self._api_session.put(
                     url,
                     json=data,
                     headers=headers,
                     timeout=10,
                 )
             elif method == "DELETE":
-                response = session.delete(
+                response = self._api_session.delete(
                     url,
                     headers=headers,
                     timeout=10,
                 )
             else:  # GET
-                response = session.get(
+                response = self._api_session.get(
                     url,
                     headers=headers,
                     timeout=10,
                 )
 
             logger.info(f"API Server response status: {response.status_code}")
-
-            # If we got 401, log the response body for debugging
-            if response.status_code == 401:
-                try:
-                    error_body = response.text
-                    logger.error(f"API Server 401 response: {error_body[:200]}")
-                except:
-                    pass
 
             # Prepare response
             api_response = {
