@@ -28,6 +28,8 @@ clearance_allowed {
 
 # Department check
 department_allowed {
+    input.resource.classification == "BASIC"  # PUBLIC maps to BASIC
+} else {
     input.user.department == input.resource.department
 }
 

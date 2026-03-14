@@ -119,6 +119,13 @@ class OpaAgentClient:
                 aes_key = os.urandom(32)  # 256-bit
                 iv = os.urandom(12)  # 96-bit for GCM recommended
 
+                from cryptography.hazmat.primitives.ciphers import (
+                    Cipher,
+                    algorithms,
+                    modes,
+                )
+                from cryptography.hazmat.backends import default_backend
+
                 # Encrypt data with AES-GCM
                 encryptor = Cipher(
                     algorithms.AES(aes_key), modes.GCM(iv), backend=default_backend()
@@ -137,15 +144,13 @@ class OpaAgentClient:
                     ),
                 )
 
-                # Package everything - APPEND TAG TO DATA for client compatibility
+                # Package everything
                 result = {
                     "type": "hybrid",
                     "encrypted_key": base64.b64encode(encrypted_key).decode("utf-8"),
-                    "encrypted_data": base64.b64encode(encrypted_data + tag).decode(
-                        "utf-8"
-                    ),  # Tag appended
+                    "encrypted_data": base64.b64encode(encrypted_data).decode("utf-8"),
                     "iv": base64.b64encode(iv).decode("utf-8"),
-                    # REMOVED: separate tag field
+                    "tag": base64.b64encode(tag).decode("utf-8"),
                     "algorithm": "RSA-OAEP-SHA256 + AES-256-GCM",
                 }
 
@@ -169,13 +174,14 @@ class OpaAgentClient:
         }
 
         try:
+
             logger.info(f"[{request_id}] 📡 Sending to OPA Agent")
 
             # Use SSL-fixed session - NO FALLBACKS
             response = self.session.post(
                 f"{self.agent_url}/evaluate",
                 json=payload,
-                timeout=30,  # Increased from 15 to 30 seconds
+                timeout=30,
                 # No verify parameter - SSL context handles it
             )
 
@@ -197,13 +203,6 @@ class OpaAgentClient:
             return {
                 "access_denied": True,
                 "reason": "SSL verification failed - secure connection required",
-            }
-
-        except requests.exceptions.Timeout as timeout_error:
-            logger.error(f"[{request_id}] ❌ Timeout Error: {timeout_error}")
-            return {
-                "access_denied": True,
-                "reason": "OPA Agent timeout - service may be overloaded",
             }
 
         except requests.exceptions.ConnectionError as conn_error:

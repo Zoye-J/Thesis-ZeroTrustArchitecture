@@ -52,7 +52,6 @@
 </div>
 
 <script>
-// SIMPLE LOGIN - NO AUTO CHECKS
 document.getElementById('loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     
@@ -60,54 +59,63 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
     const password = document.getElementById('password').value;
     const messageDiv = document.getElementById('message');
     
-    // Clear previous messages
-    messageDiv.innerHTML = '';
-    
-    // Show loading
-    messageDiv.innerHTML = '<div style="background: #d1ecf1; color: #0c5460; padding: 10px; border-radius: 5px; margin: 10px 0;">Logging in...</div>';
+    messageDiv.innerHTML = '<div style="background: #d1ecf1; color: #0c5460; padding: 10px; border-radius: 5px; margin: 10px 0;">🔄 Logging in...</div>';
     
     try {
-        console.log('Logging in with:', username);
-        
+        // Step 1: Login
         const response = await fetch('/api/auth/login', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password })
         });
         
-        // First check if it's JSON
-        const contentType = response.headers.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) {
-            const text = await response.text();
-            console.error('Server returned HTML:', text.substring(0, 200));
-            throw new Error('Server returned HTML instead of JSON');
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Login failed');
         }
         
-        // Parse JSON
         const data = await response.json();
-        console.log('Login response:', data);
+        console.log('Login successful:', data);
         
-        if (response.ok && data.access_token) {
-            // Store token
-            localStorage.setItem('access_token', data.access_token);
-            
-            // Show success
-            messageDiv.innerHTML = '<div style="background: #d4edda; color: #155724; padding: 10px; border-radius: 5px; margin: 10px 0;">✅ Login successful! Redirecting...</div>';
-
-            // Redirect to dashboard
-            setTimeout(() => {
-                window.location.href = '/dashboard';
-            }, 1000);
-        } else {
-            // Show error
-            messageDiv.innerHTML = `<div style="background: #f8d7da; color: #721c24; padding: 10px; border-radius: 5px; margin: 10px 0;">Error: ${data.error || 'Login failed'}</div>`;
+        // Step 2: Store token
+        localStorage.setItem('access_token', data.access_token);
+        
+        // Step 3: CRITICAL - Load encryption keys
+        messageDiv.innerHTML = '<div style="background: #d1ecf1; color: #0c5460; padding: 10px; border-radius: 5px; margin: 10px 0;">🔑 Loading encryption keys...</div>';
+        
+        // Wait for ztaEncryptor
+        let retries = 0;
+        while (!window.ztaEncryptor && retries < 10) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+            retries++;
         }
+        
+        if (window.ztaEncryptor) {
+            // Initialize encryption
+            await window.ztaEncryptor.init();
+            
+            // Load keys from IndexedDB into the encryptor
+            const keyPair = await window.ztaAutomatedSetup.getStoredKeyPair();
+            if (keyPair) {
+                window.ztaEncryptor.userPrivateKey = keyPair.privateKey;
+                window.ztaEncryptor.userPublicKey = keyPair.publicKey;
+                console.log('✅ Keys loaded into encryptor');
+                console.log('Private key length:', keyPair.privateKey.length);
+            } else {
+                console.warn('⚠️ No keys found in IndexedDB');
+            }
+        }
+        
+        // Step 4: Redirect
+        messageDiv.innerHTML = '<div style="background: #d4edda; color: #155724; padding: 10px; border-radius: 5px; margin: 10px 0;">✅ Login successful! Redirecting...</div>';
+        
+        setTimeout(() => {
+            window.location.href = '/dashboard';
+        }, 1500);
         
     } catch (error) {
         console.error('Login error:', error);
-        messageDiv.innerHTML = `<div style="background: #f8d7da; color: #721c24; padding: 10px; border-radius: 5px; margin: 10px 0;">Error: ${error.message}</div>`;
+        messageDiv.innerHTML = `<div style="background: #f8d7da; color: #721c24; padding: 10px; border-radius: 5px; margin: 10px 0;">❌ Error: ${error.message}</div>`;
     }
 });
 

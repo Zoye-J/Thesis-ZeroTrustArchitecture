@@ -155,14 +155,14 @@ def gateway_proxy(subpath):
         # Use REAL service communicator to process request
         result = process_encrypted_request(request, user_claims)
 
-         # Check if this is an encrypted response
+        # Check if this is an encrypted response
         if isinstance(result, tuple):
             response_data, status_code = result
-            if hasattr(response_data, 'json'):
+            if hasattr(response_data, "json"):
                 try:
                     json_data = response_data.get_json()
                     # If it's encrypted, return as-is
-                    if json_data and 'encrypted_response' in json_data:
+                    if json_data and "encrypted_response" in json_data:
                         return response_data, status_code
                 except:
                     pass

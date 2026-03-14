@@ -711,10 +711,6 @@ async function requestResourceAccess(resourceId) {
 
 
 function showResourceModal(resourceId, encryptedResponse) {
-    // Add this at the beginning of showResourceModal
-    console.log('🔍 Encrypted response type:', typeof encryptedResponse);
-    console.log('🔍 Encrypted response preview:', encryptedResponse.substring(0, 100));
-    console.log('🔍 Is valid JSON?', (() => { try { JSON.parse(encryptedResponse); return true; } catch { return false; } })());
     // Create modal HTML
     const modalHtml = `
         <div id="resource-modal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:10000; display:flex; align-items:center; justify-content:center;">
@@ -786,7 +782,6 @@ function showResourceModal(resourceId, encryptedResponse) {
                     <strong>ZTA Context:</strong> End-to-end encrypted | Trace ID: ${escapeHtml(traceId)}
                 </div>
             `;
-            
             
         } catch (error) {
             console.error('❌ Modal decryption error:', error);

@@ -26,9 +26,9 @@ DOMAIN_TO_FACILITY = {
 }
 
 DOMAIN_TO_DEFAULT_DEPT = {
-    "mod.gov": "MOD",          
-    "mof.gov": "MOF",            
-    "nsa.gov": "NSA",           
+    "mod.gov": "MOD",
+    "mof.gov": "MOF",
+    "nsa.gov": "NSA",
 }
 
 DOMAIN_TO_CLEARANCE = {
