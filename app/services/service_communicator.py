@@ -294,6 +294,10 @@ class EncryptedServiceCommunicator:
             )
 
             # Build MINIMAL data for encryption
+            resource_department = resource.department
+            if resource.classification == "PUBLIC":
+                resource_department = user_claims.get("department", resource.department)
+
             minimal_data = {
                 "u": {  # User
                     "c": user_claims.get("clearance_level", "BASIC"),
@@ -301,7 +305,7 @@ class EncryptedServiceCommunicator:
                 },
                 "r": {  # Resource
                     "c": opa_classification,
-                    "d": resource.department,
+                    "d": resource_department,
                     "id": resource_id,
                 },
                 "e": {  # Environment
