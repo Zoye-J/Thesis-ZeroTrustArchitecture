@@ -3,368 +3,1107 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ZTA Real-Time Audit Dashboard</title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <title>ZTA — Security Operations Center</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Syne:wght@400;600;700;800&family=Roboto+Mono:wght@500;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         :root {
-            --primary-color: #2c3e50;
-            --secondary-color: #3498db;
-            --success-color: #27ae60;
-            --warning-color: #f39c12;
-            --danger-color: #e74c3c;
-            --info-color: #17a2b8;
-        }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f5f7fa;
-            margin: 0;
-            padding: 0;
-        }
-        
-        .navbar {
-            background: linear-gradient(135deg, var(--primary-color), #1a252f);
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        
-        .dashboard-container {
-            padding: 20px;
-        }
-        
-        .card {
-            border: none;
-            border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
-            transition: transform 0.3s;
-        }
-        
-        .card:hover {
-            transform: translateY(-5px);
-        }
-        
-        .stat-card {
-            text-align: center;
-            padding: 20px;
-        }
-        
-        .stat-value {
-            font-size: 2.5rem;
-            font-weight: bold;
-            margin: 10px 0;
-        }
-        
-        .event-card {
-            height: 400px;
-            overflow-y: auto;
-        }
-        
-        .event-item {
-            padding: 10px;
-            border-left: 4px solid var(--info-color);
-            margin-bottom: 8px;
-            background: white;
-            border-radius: 5px;
-        }
-        
-        .event-item.INFO { border-left-color: var(--info-color); }
-        .event-item.LOW { border-left-color: var(--success-color); }
-        .event-item.MEDIUM { border-left-color: var(--warning-color); }
-        .event-item.HIGH { border-left-color: var(--danger-color); }
-        .event-item.CRITICAL { border-left-color: #8b0000; }
-        
-        .event-time {
-            font-size: 0.8rem;
-            color: #666;
-        }
-        
-        .event-user {
-            font-weight: bold;
-            color: var(--primary-color);
-        }
-        
-        .event-action {
-            font-weight: 500;
-        }
-        
-        .component-badge {
-            display: inline-block;
-            padding: 3px 8px;
-            border-radius: 12px;
-            font-size: 0.75rem;
-            font-weight: bold;
-            margin-right: 5px;
+            --bg:       #080b10;
+            --bg2:      #0d1117;
+            --bg3:      #131a24;
+            --bg4:      #1a2333;
+            --border:   #1e2d42;
+            --border2:  #243447;
+            --text:     #c8d8e8;
+            --text2:    #7a96b2;
+            --text3:    #435a70;
+            --accent:   #00e5ff;
+            --accent2:  #0091ff;
+            --green:    #00ff88;
+            --amber:    #ffb300;
+            --red:      #ff3d5a;
+            --purple:   #b57aff;
+            --glow:     rgba(0,229,255,0.12);
+            --glow2:    rgba(0,229,255,0.06);
         }
 
-        /* Force all badges to have black text */
-        .badge {
-            color: #000 !important;
-            font-weight: 600;
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'JetBrains Mono', monospace;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            overflow-x: hidden;
         }
-        
-        .gateway { background-color: #e3f2fd; color: #1565c0; }
-        .opa_agent { background-color: #e8f5e9; color: #2e7d32; }
-        .opa_server { background-color: #fff3e0; color: #ef6c00; }
-        .api_server { background-color: #f3e5f5; color: #7b1fa2; }
-        
-        .trace-flow {
+
+        /* Scanline overlay */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px);
+            pointer-events: none;
+            z-index: 9999;
+        }
+
+        /* ===== NAVBAR ===== */
+        .soc-nav {
+            background: var(--bg2);
+            border-bottom: 1px solid var(--border);
+            padding: 0 24px;
+            height: 56px;
             display: flex;
             align-items: center;
-            margin: 20px 0;
-            overflow-x: auto;
-            padding: 10px;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 100;
         }
-        
-        .flow-step {
+
+        .nav-brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .brand-icon {
+            width: 28px;
+            height: 28px;
+            background: var(--accent);
+            clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            animation: pulse-hex 3s ease-in-out infinite;
+        }
+
+        @keyframes pulse-hex {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(0,229,255,0.4); }
+            50% { box-shadow: 0 0 0 8px rgba(0,229,255,0); }
+        }
+
+        .brand-text {
+            font-family: 'Roboto Mono', monospace;
+            font-weight: 700;
+            font-size: 15px;
+            letter-spacing: 0.08em;
+            color: #fff;
+        }
+
+        .brand-sub {
+            font-size: 10px;
+            color: var(--text3);
+            letter-spacing: 0.2em;
+            text-transform: uppercase;
+        }
+
+        .nav-center {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .nav-tab {
+            padding: 6px 16px;
+            border-radius: 4px;
+            font-size: 11px;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            cursor: pointer;
+            color: var(--text2);
+            border: 1px solid transparent;
+            transition: all 0.2s;
+            background: none;
+        }
+
+        .nav-tab:hover { color: var(--text); border-color: var(--border); }
+        .nav-tab.active { color: var(--accent); border-color: var(--accent); background: var(--glow2); }
+
+        .nav-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .live-badge {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 10px;
+            letter-spacing: 0.15em;
+            color: var(--green);
+        }
+
+        .live-dot {
+            width: 6px;
+            height: 6px;
+            background: var(--green);
+            border-radius: 50%;
+            animation: blink 1.5s ease-in-out infinite;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        .time-display {
+            font-size: 12px;
+            color: var(--text2);
+            letter-spacing: 0.05em;
+        }
+
+        .conn-pill {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 10px;
+            letter-spacing: 0.1em;
+            border: 1px solid;
+        }
+
+        .conn-pill.connected { color: var(--green); border-color: rgba(0,255,136,0.3); background: rgba(0,255,136,0.05); }
+        .conn-pill.disconnected { color: var(--red); border-color: rgba(255,61,90,0.3); background: rgba(255,61,90,0.05); }
+
+        /* ===== LAYOUT ===== */
+        .soc-layout {
+            display: grid;
+            grid-template-columns: 260px 1fr;
+            grid-template-rows: auto 1fr;
+            min-height: calc(100vh - 56px);
+        }
+
+        .soc-sidebar {
+            grid-row: 1 / 3;
+            background: var(--bg2);
+            border-right: 1px solid var(--border);
+            padding: 20px 0;
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+        }
+
+        .soc-main {
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        /* ===== STAT CARDS - UPDATED ===== */
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+        }
+
+        .stat-card {
+            background: var(--bg2);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px 16px;  /* Increased padding */
+            position: relative;
+            overflow: hidden;
+            transition: border-color 0.3s;
+        }
+
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 2px;
+            background: var(--accent-color, var(--accent));
+            opacity: 0.7;
+        }
+
+        .stat-card:hover { border-color: var(--border2); }
+
+        .stat-label {
+            font-size: 11px;  /* Increased from 9px */
+            letter-spacing: 0.15em;  /* Slightly tighter */
+            text-transform: uppercase;
+            color: var(--text3);
+            margin-bottom: 12px;  /* Increased from 8px */
+            font-weight: 500;
+        }
+
+        .stat-value {
+            font-family: 'Roboto Mono', 'Syne', monospace;  /* Monospace for numbers */
+            font-size: 42px;  /* Increased from 32px */
+            font-weight: 700;
+            color: #fff;
+            line-height: 1;
+            margin-bottom: 8px;  /* Increased from 4px */
+            letter-spacing: -0.02em;  /* Tighter for large numbers */
+        }
+
+        .stat-delta {
+            font-size: 12px;  /* Increased from 10px */
+            color: var(--text3);
+            font-weight: 400;
+        }
+
+        /* Optional: Add subtle glow to numbers */
+        .stat-card:hover .stat-value {
+            text-shadow: 0 0 15px var(--glow);
+        }
+
+        /* ===== SIDEBAR SECTIONS ===== */
+        .sidebar-section {
+            padding: 0 16px 16px;
+        }
+
+        .sidebar-label {
+            font-size: 10px;  /* Increased from 9px */
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            color: var(--text3);
+            padding: 12px 16px 8px;
+            display: block;
+            font-weight: 500;
+        }
+
+        .filter-group { display: flex; flex-direction: column; gap: 4px; }
+
+        .filter-chip {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;  /* Increased from 7px 12px */
+            border-radius: 6px;
+            font-size: 12px;  /* Increased from 11px */
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: all 0.15s;
+            color: var(--text2);
+            background: none;
+        }
+
+        .filter-chip:hover { background: var(--bg3); color: var(--text); }
+        .filter-chip.active { background: var(--glow2); border-color: rgba(0,229,255,0.2); color: var(--accent); }
+
+        .chip-count {
+            font-size: 10px;  /* Increased from 9px */
+            padding: 2px 7px;  /* Increased from 1px 6px */
+            border-radius: 12px;
+            background: var(--bg4);
+            color: var(--text3);
+        }
+
+        .filter-chip.active .chip-count { background: rgba(0,229,255,0.15); color: var(--accent); }
+
+        .sidebar-divider { border: none; border-top: 1px solid var(--border); margin: 8px 16px; }
+
+        /* Component status */
+        .component-list { display: flex; flex-direction: column; gap: 8px; }
+
+        .comp-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 9px 12px;  /* Increased from 8px 12px */
+            background: var(--bg3);
+            border-radius: 6px;
+            border: 1px solid var(--border);
+        }
+
+        .comp-left { display: flex; align-items: center; gap: 8px; }
+        .comp-dot { width: 8px; height: 8px; border-radius: 50%; }  /* Increased from 7px */
+        .comp-dot.running { background: var(--green); box-shadow: 0 0 6px rgba(0,255,136,0.5); }
+        .comp-dot.down { background: var(--red); }
+        .comp-dot.unknown { background: var(--text3); }
+        .comp-name { font-size: 12px; color: var(--text); }  /* Increased from 11px */
+        .comp-port { font-size: 11px; color: var(--text3); }  /* Increased from 10px */
+
+        /* Search box */
+        .search-wrap {
+            position: relative;
+            padding: 0 16px;
+            margin-bottom: 4px;
+        }
+
+        .search-input {
+            width: 100%;
+            background: var(--bg3);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 9px 12px 9px 34px;  /* Increased from 8px 12px 8px 32px */
+            font-size: 12px;  /* Increased from 11px */
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text);
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .search-input:focus { border-color: var(--accent); }
+        .search-input::placeholder { color: var(--text3); }
+
+        .search-icon {
+            position: absolute;
+            left: 27px;  /* Adjusted */
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text3);
+            font-size: 12px;  /* Increased from 11px */
+        }
+
+        /* ===== MAIN CONTENT PANELS ===== */
+        .panel {
+            background: var(--bg2);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 16px;  /* Increased from 12px 16px */
+            border-bottom: 1px solid var(--border);
+            background: var(--bg3);
+        }
+
+        .panel-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;  /* Increased from 11px */
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--text2);
+        }
+
+        .panel-title .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }  /* Increased from 6px */
+
+        .panel-actions { display: flex; align-items: center; gap: 8px; }
+
+        .btn-sm-icon {
+            width: 30px; height: 30px;  /* Increased from 28px */
+            border-radius: 4px;
+            background: var(--bg4);
+            border: 1px solid var(--border);
+            color: var(--text2);
+            font-size: 12px;  /* Increased from 11px */
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: all 0.15s;
+        }
+
+        .btn-sm-icon:hover { color: var(--text); border-color: var(--border2); }
+
+        .badge-count {
+            padding: 3px 9px;  /* Increased from 2px 8px */
+            border-radius: 12px;
+            font-size: 11px;  /* Increased from 10px */
+            background: var(--bg4);
+            color: var(--text2);
+            border: 1px solid var(--border);
+        }
+
+        /* ===== EVENT STREAM ===== */
+        .event-stream {
+            height: 420px;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: var(--border) transparent;
+        }
+
+        .event-stream::-webkit-scrollbar { width: 4px; }
+        .event-stream::-webkit-scrollbar-track { background: transparent; }
+        .event-stream::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+        .event-row {
+            display: grid;
+            grid-template-columns: 80px 110px 140px 1fr 80px 60px;
+            gap: 12px;
+            align-items: center;
+            padding: 10px 16px;  /* Increased from 9px 16px */
+            border-bottom: 1px solid rgba(30,45,66,0.5);
+            font-size: 12px;  /* Increased from 11px */
+            transition: background 0.15s;
+            cursor: pointer;
+        }
+
+        .event-row:hover { background: var(--bg3); }
+
+        .event-row.new-event {
+            animation: flash-in 0.4s ease-out;
+        }
+
+        @keyframes flash-in {
+            from { background: rgba(0,229,255,0.08); }
+            to { background: transparent; }
+        }
+
+        .event-time { color: var(--text3); font-size: 11px; }  /* Increased from 10px */
+        .event-action { color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .event-user { color: var(--text2); }
+
+        .comp-tag {
+            display: inline-block;
+            padding: 3px 8px;  /* Increased from 2px 7px */
+            border-radius: 3px;
+            font-size: 10px;  /* Increased from 9px */
+            letter-spacing: 0.06em;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .comp-tag.gateway     { background: rgba(0,145,255,0.15); color: #60afff; border: 1px solid rgba(0,145,255,0.25); }
+        .comp-tag.opa_agent   { background: rgba(0,255,136,0.1);  color: #40e090; border: 1px solid rgba(0,255,136,0.2); }
+        .comp-tag.opa_server  { background: rgba(255,179,0,0.1);  color: #ffca40; border: 1px solid rgba(255,179,0,0.2); }
+        .comp-tag.api_server  { background: rgba(181,122,255,0.1);color: #c89aff; border: 1px solid rgba(181,122,255,0.2); }
+        .comp-tag.auth_server { background: rgba(255,61,90,0.1);  color: #ff6e85; border: 1px solid rgba(255,61,90,0.2); }
+        .comp-tag.service_communicator { background: rgba(200,216,232,0.08); color: #a0b4c8; border: 1px solid rgba(200,216,232,0.15); }
+
+        .type-tag {
+            display: inline-block;
+            padding: 3px 8px;  /* Increased from 2px 7px */
+            border-radius: 3px;
+            font-size: 10px;  /* Increased from 9px */
+            letter-spacing: 0.04em;
+            font-weight: 500;
+        }
+
+        .type-tag.POLICY_ALLOW    { background: rgba(0,255,136,0.1);  color: #40e090; }
+        .type-tag.POLICY_DENY     { background: rgba(255,61,90,0.12); color: #ff6e85; }
+        .type-tag.USER_LOGIN      { background: rgba(0,145,255,0.12); color: #60afff; }
+        .type-tag.REQUEST_RECEIVED{ background: rgba(200,216,232,0.08); color: #a0b4c8; }
+        .type-tag.RESPONSE_ENCRYPTED { background: rgba(181,122,255,0.1); color: #c89aff; }
+        .type-tag.REQUEST_DECRYPTED  { background: rgba(181,122,255,0.1); color: #c89aff; }
+        .type-tag.ERROR           { background: rgba(255,61,90,0.15); color: #ff3d5a; }
+        .type-tag.JWT_ISSUED      { background: rgba(255,179,0,0.1);  color: #ffca40; }
+        .type-tag.default         { background: var(--bg4); color: var(--text3); }
+
+        .status-dot {
+            width: 7px; height: 7px; border-radius: 50%; margin: 0 auto;  /* Increased from 6px */
+        }
+
+        .status-dot.success { background: var(--green); }
+        .status-dot.failure { background: var(--red); }
+        .status-dot.pending { background: var(--amber); }
+
+        /* Table header */
+        .event-header {
+            display: grid;
+            grid-template-columns: 80px 110px 140px 1fr 80px 60px;
+            gap: 12px;
+            padding: 9px 16px;  /* Increased from 8px 16px */
+            border-bottom: 1px solid var(--border);
+            background: var(--bg3);
+        }
+
+        .ev-th {
+            font-size: 10px;  /* Increased from 9px */
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--text3);
+            font-weight: 500;
+        }
+
+        /* ===== TRACE PANEL ===== */
+        .trace-input-wrap {
+            display: flex;
+            gap: 8px;
+            padding: 14px 16px;  /* Increased from 12px 16px */
+            border-bottom: 1px solid var(--border);
+            background: var(--bg3);
+        }
+
+        .trace-input {
+            flex: 1;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 8px 12px;  /* Increased from 7px 12px */
+            font-size: 12px;  /* Increased from 11px */
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--accent);
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .trace-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--glow2); }
+        .trace-input::placeholder { color: var(--text3); }
+
+        .btn-accent {
+            padding: 8px 18px;  /* Increased from 7px 16px */
+            background: rgba(0,229,255,0.1);
+            border: 1px solid rgba(0,229,255,0.3);
+            border-radius: 4px;
+            color: var(--accent);
+            font-size: 12px;  /* Increased from 11px */
+            font-family: 'JetBrains Mono', monospace;
+            cursor: pointer;
+            letter-spacing: 0.06em;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .btn-accent:hover { background: rgba(0,229,255,0.18); border-color: var(--accent); }
+
+        .trace-body { padding: 16px; min-height: 200px; }
+
+        .trace-empty {
             display: flex;
             flex-direction: column;
             align-items: center;
-            margin: 0 15px;
-            min-width: 100px;
-        }
-        
-        .flow-node {
-            width: 50px;
-            height: 50px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
             justify-content: center;
-            font-size: 1.5rem;
-            margin-bottom: 10px;
+            padding: 40px;
+            gap: 12px;
+            color: var(--text3);
         }
-        
-        .flow-arrow {
-            font-size: 1.5rem;
-            color: #ccc;
-        }
-        
-        .user-activity {
+
+        .trace-empty-icon { font-size: 36px; opacity: 0.3; }  /* Increased from 32px */
+        .trace-empty-text { font-size: 13px; text-align: center; line-height: 1.6; }  /* Increased from 12px */
+
+        /* Trace flow viz */
+        .trace-flow-viz {
             display: flex;
             align-items: center;
-            margin-bottom: 10px;
-            padding: 10px;
-            background: white;
-            border-radius: 5px;
+            gap: 0;
+            margin-bottom: 20px;
+            overflow-x: auto;
+            padding-bottom: 8px;
         }
-        
-        .user-avatar {
-            width: 40px;
+
+        .trace-node {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+
+        .trace-node-icon {
+            width: 48px; height: 48px;  /* Increased from 44px */
+            border-radius: 8px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 20px;  /* Increased from 18px */
+            border: 1px solid;
+        }
+
+        .trace-node-label { font-size: 10px; letter-spacing: 0.1em; color: var(--text3); text-transform: uppercase; }  /* Increased from 9px */
+        .trace-node-count { font-size: 10px; color: var(--text2); }  /* Increased from 9px */
+
+        .trace-arrow {
+            width: 32px; height: 2px;
+            background: var(--border);
+            flex-shrink: 0;
+            position: relative;
+        }
+
+        .trace-arrow::after {
+            content: '';
+            position: absolute;
+            right: -4px; top: -3px;
+            border: 4px solid transparent;
+            border-left-color: var(--border);
+        }
+
+        .trace-events-table { font-size: 12px; }  /* Increased from 11px */
+        .trace-events-table th { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text3); padding: 9px 12px; border-bottom: 1px solid var(--border); font-weight: 500; }  /* Increased from 9px */
+        .trace-events-table td { padding: 9px 12px; border-bottom: 1px solid rgba(30,45,66,0.5); color: var(--text2); }  /* Increased from 8px 12px */
+
+        .trace-summary-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border);
+        }
+
+        .ts-label { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text3); margin-bottom: 5px; }  /* Increased from 9px */
+        .ts-value { font-size: 14px; color: var(--text); }  /* Increased from 13px */
+
+        /* ===== BOTTOM GRID ===== */
+        .bottom-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        /* ===== DETAIL DRAWER ===== */
+        .detail-drawer {
+            position: fixed;
+            right: -480px;
+            top: 56px;
+            width: 480px;
+            height: calc(100vh - 56px);
+            background: var(--bg2);
+            border-left: 1px solid var(--border);
+            z-index: 200;
+            transition: right 0.3s cubic-bezier(0.4,0,0.2,1);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .detail-drawer.open { right: 0; }
+
+        .drawer-header {
+            padding: 18px 16px;  /* Increased from 16px */
+            border-bottom: 1px solid var(--border);
+            background: var(--bg3);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .drawer-title { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text2); }  /* Increased from 12px */
+
+        .drawer-close {
+            width: 30px; height: 30px;  /* Increased from 28px */
+            border-radius: 4px;
+            background: var(--bg4);
+            border: 1px solid var(--border);
+            color: var(--text2);
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 15px;  /* Increased from 14px */
+            transition: all 0.15s;
+        }
+
+        .drawer-close:hover { color: var(--text); border-color: var(--border2); }
+
+        .drawer-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 18px 16px;  /* Increased from 16px */
+            scrollbar-width: thin;
+            scrollbar-color: var(--border) transparent;
+        }
+
+        .drawer-field {
+            margin-bottom: 16px;  /* Increased from 14px */
+        }
+
+        .drawer-field-label {
+            font-size: 10px;  /* Increased from 9px */
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--text3);
+            margin-bottom: 5px;  /* Increased from 4px */
+        }
+
+        .drawer-field-value {
+            font-size: 13px;  /* Increased from 12px */
+            color: var(--text);
+            word-break: break-all;
+        }
+
+        .drawer-divider { border: none; border-top: 1px solid var(--border); margin: 18px 0; }  /* Increased from 16px */
+
+        .json-pre {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 14px;  /* Increased from 12px */
+            font-size: 11px;  /* Increased from 10px */
+            overflow-x: auto;
+            color: var(--text2);
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
+
+        /* ===== ALERTS PANEL ===== */
+        .alert-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 14px 16px;  /* Increased from 12px 16px */
+            border-bottom: 1px solid rgba(30,45,66,0.5);
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .alert-item:hover { background: var(--bg3); }
+
+        .alert-sev {
+            width: 4px;
+            align-self: stretch;
+            border-radius: 2px;
+            flex-shrink: 0;
+        }
+
+        .alert-sev.HIGH    { background: var(--red); }
+        .alert-sev.MEDIUM  { background: var(--amber); }
+        .alert-sev.LOW     { background: var(--green); }
+        .alert-sev.CRITICAL{ background: #ff0040; }
+        .alert-sev.INFO    { background: var(--accent2); }
+
+        .alert-content { flex: 1; }
+        .alert-type { font-size: 12px; color: var(--text); margin-bottom: 4px; }  /* Increased from 11px */
+        .alert-meta { font-size: 11px; color: var(--text3); }  /* Increased from 10px */
+
+        /* ===== MINI BAR CHART ===== */
+        .mini-bars {
+            display: flex;
+            align-items: flex-end;
+            gap: 3px;
             height: 40px;
-            border-radius: 50%;
-            background: var(--secondary-color);
-            color: white;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            margin-right: 15px;
+            padding: 0 16px 8px;
         }
-        
-        .real-time-indicator {
+
+        .mini-bar {
+            flex: 1;
+            background: var(--accent2);
+            border-radius: 2px 2px 0 0;
+            opacity: 0.6;
+            transition: opacity 0.2s, height 0.3s;
+            min-height: 4px;
+        }
+
+        .mini-bar:hover { opacity: 1; }
+
+        /* ===== LOADING STATES ===== */
+        .skeleton {
+            background: linear-gradient(90deg, var(--bg3) 25%, var(--bg4) 50%, var(--bg3) 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+            border-radius: 4px;
+        }
+
+        @keyframes shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        /* ===== SCROLLBAR ===== */
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+        /* ===== TOASTS ===== */
+        .toast-container {
             position: fixed;
             bottom: 20px;
             right: 20px;
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            background-color: var(--success-color);
-            animation: pulse 2s infinite;
+            z-index: 9998;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
         }
-        
-        @keyframes pulse {
-            0% { transform: scale(1); opacity: 1; }
-            50% { transform: scale(1.2); opacity: 0.7; }
-            100% { transform: scale(1); opacity: 1; }
+
+        .toast-item {
+            padding: 12px 18px;  /* Increased from 10px 16px */
+            border-radius: 6px;
+            font-size: 12px;  /* Increased from 11px */
+            background: var(--bg2);
+            border: 1px solid var(--border);
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            animation: slide-up 0.3s ease-out;
+            max-width: 320px;
         }
-        
-        .filter-section {
-            background: white;
-            padding: 15px;
-            border-radius: 10px;
-            margin-bottom: 20px;
+
+        @keyframes slide-up {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
         }
+
+        .toast-item.success { border-color: rgba(0,255,136,0.3); }
+        .toast-item.error { border-color: rgba(255,61,90,0.3); }
+        .toast-item.info { border-color: rgba(0,229,255,0.3); }
+
+        /* ===== TRACE ID LINKS ===== */
+        .trace-link {
+            color: var(--accent2);
+            cursor: pointer;
+            font-size: 11px;  /* Increased from 10px */
+            text-decoration: none;
+            border-bottom: 1px dashed rgba(0,145,255,0.4);
+            transition: color 0.15s;
+        }
+
+        .trace-link:hover { color: var(--accent); border-bottom-color: var(--accent); }
+
+        /* empty state */
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 48px;
+            gap: 12px;
+            color: var(--text3);
+            font-size: 13px;  /* Increased from 12px */
+        }
+
+        /* Tabs view switching */
+        .view-panel { display: none; }
+        .view-panel.active { display: flex; flex-direction: column; gap: 16px; }
     </style>
 </head>
 <body>
-    <!-- Navigation -->
-    <nav class="navbar navbar-expand-lg navbar-dark">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="#">
-                <i class="fas fa-shield-alt"></i> ZTA Audit Dashboard
-            </a>
-            <div class="navbar-text text-white">
-                <span id="current-time"></span> | 
-                <span id="connection-status" class="badge bg-success">Connected</span>
-            </div>
-        </div>
-    </nav>
 
-    <div class="dashboard-container">
-        <!-- Statistics Row -->
-        <div class="row">
-            <div class="col-md-3">
-                <div class="card stat-card">
-                    <div class="card-body">
-                        <i class="fas fa-history fa-2x text-primary"></i>
-                        <div class="stat-value" id="total-events">0</div>
-                        <div class="text-muted">Total Events</div>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="card stat-card">
-                    <div class="card-body">
-                        <i class="fas fa-users fa-2x text-success"></i>
-                        <div class="stat-value" id="active-users">0</div>
-                        <div class="text-muted">Active Users</div>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="card stat-card">
-                    <div class="card-body">
-                        <i class="fas fa-exchange-alt fa-2x text-warning"></i>
-                        <div class="stat-value" id="active-requests">0</div>
-                        <div class="text-muted">Active Requests</div>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="card stat-card">
-                    <div class="card-body">
-                        <i class="fas fa-exclamation-triangle fa-2x text-danger"></i>
-                        <div class="stat-value" id="alerts">0</div>
-                        <div class="text-muted">Security Alerts</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Filters -->
-        <div class="filter-section">
-            <div class="row">
-                <div class="col-md-3">
-                    <select class="form-select" id="event-type-filter">
-                        <option value="">All Event Types</option>
-                        <option value="USER_LOGIN">Login Events</option>
-                        <option value="POLICY_ALLOW">Policy Allows</option>
-                        <option value="POLICY_DENY">Policy Denies</option>
-                        <option value="ENCRYPTION">Encryption Events</option>
-                        <option value="SECURITY_ALERT">Security Alerts</option>
-                    </select>
-                </div>
-                <div class="col-md-3">
-                    <select class="form-select" id="component-filter">
-                        <option value="">All Components</option>
-                        <option value="gateway">Gateway</option>
-                        <option value="opa_agent">OPA Agent</option>
-                        <option value="opa_server">OPA Server</option>
-                        <option value="api_server">API Server</option>
-                    </select>
-                </div>
-                <div class="col-md-3">
-                    <select class="form-select" id="severity-filter">
-                        <option value="">All Severities</option>
-                        <option value="INFO">Info</option>
-                        <option value="LOW">Low</option>
-                        <option value="MEDIUM">Medium</option>
-                        <option value="HIGH">High</option>
-                        <option value="CRITICAL">Critical</option>
-                    </select>
-                </div>
-                <div class="col-md-3">
-                    <button class="btn btn-primary w-100" onclick="refreshEvents()">
-                        <i class="fas fa-sync-alt"></i> Refresh
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Main Content -->
-        <div class="row">
-            <!-- Real-Time Events - FULL WIDTH -->
-            <div class="col-md-12">
-                <div class="card event-card">
-                    <div class="card-header bg-primary text-white">
-                        <i class="fas fa-stream"></i> Real-Time Events
-                        <span class="badge bg-light text-dark float-end" id="event-count">0</span>
-                    </div>
-                    <div class="card-body" id="events-container">
-                        <!-- Events will be populated here -->
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        
-            
-        </div>
-
-        <!-- Trace Flow Visualization -->
-        <div class="row mt-4">
-            <div class="col-12">
-                <div class="card">
-                    <div class="card-header bg-info text-white">
-                        <i class="fas fa-project-diagram"></i> Request Flow Trace
-                        <div class="input-group input-group-sm w-50 float-end">
-                            <input type="text" class="form-control" 
-                                placeholder="Enter Trace ID (e.g., trace_...)" 
-                                id="trace-input"
-                                list="trace-suggestions">
-                            <button class="btn btn-primary" type="button" onclick="searchTraceById()">
-                                <i class="fas fa-search"></i> Search
-                            </button>
-                        </div>
-                    </div>
-                    <div class="card-body">
-                        <!-- Add datalist for suggestions -->
-                        <datalist id="trace-suggestions">
-                            <option value="trace_1769458655046_b8abbda3">
-                            <option value="trace_1769447093554_2b4c9467">
-                            <option value="trace_1769447096389_ff5d2de7">
-                        </datalist>
-                        
-                        <div id="trace-flow">
-                            <!-- Trace flow will be shown here -->
-                            <div class="alert alert-info">
-                                <h5><i class="fas fa-info-circle"></i> How to use Trace Search:</h5>
-                                <ol class="mb-0">
-                                    <li>Click any <code>Trace: XXXXX...</code> link in events above</li>
-                                    <li>OR enter a trace ID manually (see examples in dropdown)</li>
-                                    <li>Click Search or press Enter</li>
-                                </ol>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Component Status -->
-        <div class="row mt-4">
-            <div class="col-12">
-                <div class="card">
-                    <div class="card-header bg-dark text-white">
-                        <i class="fas fa-server"></i> Component Status
-                    </div>
-                    <div class="card-body">
-                        <div class="row" id="component-status">
-                            <!-- Component status will be populated here -->
-                        </div>
-                    </div>
-                </div>
-            </div>
+<!-- NAV -->
+<nav class="soc-nav">
+    <div class="nav-brand">
+        <div class="brand-icon"></div>
+        <div>
+            <div class="brand-text">ZTA SOC</div>
+            <div class="brand-sub">Security Operations Center</div>
         </div>
     </div>
 
-    <!-- Real-time indicator -->
-    <div class="real-time-indicator" title="Real-time updates active"></div>
+    <div class="nav-center">
+        <button class="nav-tab active" onclick="switchView('events', this)">Event Stream</button>
+        <button class="nav-tab" onclick="switchView('trace', this)">Trace Search</button>
+        <button class="nav-tab" onclick="switchView('alerts', this)">Alerts</button>
+    </div>
 
-    <!-- JavaScript -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
-    <script src="{{ url_for('static', filename='js/audit-dashboard.js') }}"></script>
+    <div class="nav-right">
+        <div class="live-badge">
+            <div class="live-dot"></div>
+            LIVE
+        </div>
+        <div class="time-display" id="current-time">--:--:--</div>
+        <div class="conn-pill connected" id="conn-status">
+            <div class="live-dot"></div>
+            <span>CONNECTED</span>
+        </div>
+    </div>
+</nav>
+
+<!-- LAYOUT -->
+<div class="soc-layout">
+
+    <!-- SIDEBAR -->
+    <aside class="soc-sidebar">
+        <span class="sidebar-label">Search</span>
+        <div class="search-wrap">
+            <span class="search-icon">⌕</span>
+            <input class="search-input" type="text" id="global-search" placeholder="Search events...">
+        </div>
+
+        <span class="sidebar-label">Event Type</span>
+        <div class="sidebar-section">
+            <div class="filter-group" id="type-filters">
+                <div class="filter-chip active" data-filter="type" data-value="all" onclick="setFilter('type','all',this)">
+                    <span>All Types</span>
+                    <span class="chip-count" id="count-all">0</span>
+                </div>
+                <div class="filter-chip" data-filter="type" data-value="POLICY_ALLOW" onclick="setFilter('type','POLICY_ALLOW',this)">
+                    <span>Policy Allow</span>
+                    <span class="chip-count" id="count-POLICY_ALLOW">0</span>
+                </div>
+                <div class="filter-chip" data-filter="type" data-value="POLICY_DENY" onclick="setFilter('type','POLICY_DENY',this)">
+                    <span>Policy Deny</span>
+                    <span class="chip-count" id="count-POLICY_DENY">0</span>
+                </div>
+                <div class="filter-chip" data-filter="type" data-value="USER_LOGIN" onclick="setFilter('type','USER_LOGIN',this)">
+                    <span>User Login</span>
+                    <span class="chip-count" id="count-USER_LOGIN">0</span>
+                </div>
+                <div class="filter-chip" data-filter="type" data-value="REQUEST_RECEIVED" onclick="setFilter('type','REQUEST_RECEIVED',this)">
+                    <span>Requests</span>
+                    <span class="chip-count" id="count-REQUEST_RECEIVED">0</span>
+                </div>
+                <div class="filter-chip" data-filter="type" data-value="RESPONSE_ENCRYPTED" onclick="setFilter('type','RESPONSE_ENCRYPTED',this)">
+                    <span>Encrypted</span>
+                    <span class="chip-count" id="count-RESPONSE_ENCRYPTED">0</span>
+                </div>
+                <div class="filter-chip" data-filter="type" data-value="ERROR" onclick="setFilter('type','ERROR',this)">
+                    <span>Errors</span>
+                    <span class="chip-count" id="count-ERROR">0</span>
+                </div>
+            </div>
+        </div>
+
+        <hr class="sidebar-divider">
+
+        <span class="sidebar-label">Component</span>
+        <div class="sidebar-section">
+            <div class="filter-group">
+                <div class="filter-chip active" data-filter="component" data-value="all" onclick="setFilter('component','all',this)">
+                    <span>All Components</span>
+                </div>
+                <div class="filter-chip" data-filter="component" data-value="gateway" onclick="setFilter('component','gateway',this)">
+                    <span>Gateway</span>
+                    <span class="comp-tag gateway">5000</span>
+                </div>
+                <div class="filter-chip" data-filter="component" data-value="opa_agent" onclick="setFilter('component','opa_agent',this)">
+                    <span>OPA Agent</span>
+                    <span class="comp-tag opa_agent">8282</span>
+                </div>
+                <div class="filter-chip" data-filter="component" data-value="opa_server" onclick="setFilter('component','opa_server',this)">
+                    <span>OPA Server</span>
+                    <span class="comp-tag opa_server">8181</span>
+                </div>
+                <div class="filter-chip" data-filter="component" data-value="api_server" onclick="setFilter('component','api_server',this)">
+                    <span>API Server</span>
+                    <span class="comp-tag api_server">5001</span>
+                </div>
+            </div>
+        </div>
+
+        <hr class="sidebar-divider">
+
+        <span class="sidebar-label">System Status</span>
+        <div class="sidebar-section">
+            <div class="component-list" id="comp-status-list">
+                <div class="comp-item">
+                    <div class="comp-left">
+                        <div class="comp-dot unknown" id="dot-gateway"></div>
+                        <span class="comp-name">Gateway</span>
+                    </div>
+                    <span class="comp-port">:5000</span>
+                </div>
+                <div class="comp-item">
+                    <div class="comp-left">
+                        <div class="comp-dot unknown" id="dot-api_server"></div>
+                        <span class="comp-name">API Server</span>
+                    </div>
+                    <span class="comp-port">:5001</span>
+                </div>
+                <div class="comp-item">
+                    <div class="comp-left">
+                        <div class="comp-dot unknown" id="dot-opa_agent"></div>
+                        <span class="comp-name">OPA Agent</span>
+                    </div>
+                    <span class="comp-port">:8282</span>
+                </div>
+                <div class="comp-item">
+                    <div class="comp-left">
+                        <div class="comp-dot unknown" id="dot-opa_server"></div>
+                        <span class="comp-name">OPA Server</span>
+                    </div>
+                    <span class="comp-port">:8181</span>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- MAIN -->
+    <main class="soc-main">
+
+        <!-- STATS - Updated with larger text and monospace numbers -->
+        <div class="stats-row">
+            <div class="stat-card" style="--accent-color: var(--accent)">
+                <div class="stat-label">Total Events</div>
+                <div class="stat-value" id="stat-total">66</div>
+                <div class="stat-delta">today</div>
+            </div>
+            <div class="stat-card" style="--accent-color: var(--green)">
+                <div class="stat-label">Active Users</div>
+                <div class="stat-value" id="stat-users">2</div>
+                <div class="stat-delta">unique sessions</div>
+            </div>
+            <div class="stat-card" style="--accent-color: var(--amber)">
+                <div class="stat-label">Policy Denials</div>
+                <div class="stat-value" id="stat-denials">8</div>
+                <div class="stat-delta">access blocked</div>
+            </div>
+            <div class="stat-card" style="--accent-color: var(--red)">
+                <div class="stat-label">Errors</div>
+                <div class="stat-value" id="stat-errors">0</div>
+                <div class="stat-delta">system errors</div>
+            </div>
+        </div>
+
+        <!-- EVENT STREAM VIEW -->
+        <div id="view-events" class="view-panel active">
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title">
+                        <div class="dot"></div>
+                        Real-Time Event Stream
+                    </div>
+                    <div class="panel-actions">
+                        <span class="badge-count" id="event-count">0 events</span>
+                        <button class="btn-sm-icon" onclick="clearEvents()" title="Clear">✕</button>
+                        <button class="btn-sm-icon" onclick="loadEvents()" title="Refresh">↻</button>
+                        <button class="btn-sm-icon" id="pause-btn" onclick="togglePause()" title="Pause">⏸</button>
+                    </div>
+                </div>
+                <div class="event-header">
+                    <span class="ev-th">Time</span>
+                    <span class="ev-th">Component</span>
+                    <span class="ev-th">Event Type</span>
+                    <span class="ev-th">Action</span>
+                    <span class="ev-th">User / Trace</span>
+                    <span class="ev-th">Status</span>
+                </div>
+                <div class="event-stream" id="event-stream">
+                    <div class="empty-state">
+                        <div style="font-size:24px;opacity:0.3">⋯</div>
+                        <div>Waiting for events...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TRACE VIEW -->
+        <div id="view-trace" class="view-panel">
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title">
+                        <div class="dot" style="background:var(--purple)"></div>
+                        Request Flow Trace
+                    </div>
+                </div>
+                <div class="trace-input-wrap">
+                    <input class="trace-input" type="text" id="trace-input" 
+                        placeholder="Enter trace ID — e.g. trace_1773532197036_a22d91ee or UUID">
+                    <button class="btn-accent" onclick="searchTraceById()">Search →</button>
+                    <button class="btn-accent" style="background:rgba(255,179,0,0.08);border-color:rgba(255,179,0,0.3);color:var(--amber)" onclick="loadRecentTraces()">Recent</button>
+                </div>
+                <div class="trace-body" id="trace-body">
+                    <div class="trace-empty">
+                        <div class="trace-empty-icon">⬡</div>
+                        <div class="trace-empty-text">
+                            Enter a trace ID above to visualize the full request flow.<br>
+                            Click any <span style="color:var(--accent2)">trace link</span> in the event stream to auto-populate.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ALERTS VIEW -->
+        <div id="view-alerts" class="view-panel">
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title">
+                        <div class="dot" style="background:var(--red)"></div>
+                        Security Alerts
+                    </div>
+                    <div class="panel-actions">
+                        <span class="badge-count" id="alert-count">0 alerts</span>
+                        <button class="btn-sm-icon" onclick="loadAlerts()">↻</button>
+                    </div>
+                </div>
+                <div id="alerts-list" style="max-height:500px;overflow-y:auto;">
+                    <div class="empty-state">No alerts detected</div>
+                </div>
+            </div>
+        </div>
+
+    </main>
+</div>
+
+<!-- DETAIL DRAWER -->
+<div class="detail-drawer" id="detail-drawer">
+    <div class="drawer-header">
+        <div class="drawer-title">Event Detail</div>
+        <button class="drawer-close" onclick="closeDrawer()">✕</button>
+    </div>
+    <div class="drawer-body" id="drawer-body"></div>
+</div>
+
+<!-- TOAST CONTAINER -->
+<div class="toast-container" id="toast-container"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
+<script src="{{ url_for('static', filename='js/audit-dashboard.js') }}"></script>
 </body>
 </html>

@@ -1,587 +1,481 @@
 {% extends "base.html" %}
-
-{% block title %}Register - Government System{% endblock %}
+{% block title %}Register — ZTA Government System{% endblock %}
 
 {% block extra_css %}
 <style>
-    .registration-container {
-        max-width: 500px;
+    .reg-layout {
+        max-width: 600px;
         margin: 0 auto;
-        padding: 2rem;
+        padding: 40px 24px 60px;
     }
-    
-    .registration-card {
-        background: white;
-        border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        padding: 2rem;
+
+    .reg-card {
+        background: var(--white);
+        border: 1px solid var(--divider);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-md);
+        overflow: hidden;
     }
-    
-    .form-header {
-        text-align: center;
-        margin-bottom: 2rem;
-    }
-    
-    .form-header h1 {
-        color: #1a237e;
-        margin: 0 0 0.5rem 0;
-    }
-    
-    .form-group {
-        margin-bottom: 1.5rem;
-    }
-    
-    .form-group label {
-        display: block;
-        margin-bottom: 0.5rem;
-        font-weight: bold;
-        color: #333;
-    }
-    
-    .form-control {
-        width: 100%;
-        padding: 0.75rem;
-        border: 2px solid #ddd;
-        border-radius: 5px;
-        font-size: 1rem;
-        transition: border-color 0.3s;
-    }
-    
-    .form-control:focus {
-        outline: none;
-        border-color: #1a237e;
-    }
-    
-    .select-control {
-        width: 100%;
-        padding: 0.75rem;
-        border: 2px solid #ddd;
-        border-radius: 5px;
-        font-size: 1rem;
-        background: white;
-        cursor: pointer;
-    }
-    
-    .submit-btn {
-        background: #1a237e;
-        color: white;
-        border: none;
-        padding: 1rem 2rem;
-        border-radius: 5px;
-        font-size: 1rem;
-        font-weight: bold;
-        cursor: pointer;
-        width: 100%;
-        transition: background 0.3s;
-    }
-    
-    .submit-btn:hover {
-        background: #283593;
-    }
-    
-    .info-box {
-        background: #e3f2fd;
-        border-left: 4px solid #2196f3;
-        padding: 1rem;
-        margin-bottom: 2rem;
-        border-radius: 5px;
-    }
-    
-    .email-domain {
-        display: inline-block;
-        background: #1a237e;
-        color: white;
-        padding: 0.25rem 0.75rem;
-        border-radius: 12px;
-        font-size: 0.9rem;
-        font-weight: bold;
-        margin: 0 0.25rem;
-    }
-    
-    .alert {
-        padding: 1rem;
-        border-radius: 5px;
-        margin-bottom: 1rem;
-        display: none;
-    }
-    
-    .alert-success {
-        background: #d4edda;
-        color: #155724;
-        border: 1px solid #c3e6cb;
-    }
-    
-    .alert-error {
-        background: #f8d7da;
-        color: #721c24;
-        border: 1px solid #f5c6cb;
-    }
-    
-    .back-link {
-        display: block;
-        text-align: center;
-        margin-top: 1.5rem;
-        color: #1a237e;
-        text-decoration: none;
-    }
-    
-    .password-requirements {
-        background: #f8f9fa;
-        padding: 1rem;
-        border-radius: 5px;
-        margin-top: 0.5rem;
-        font-size: 0.9rem;
-    }
-    
-    /* Automated setup styles */
-    .automated-setup {
-        background: #f0f7ff;
-        border: 2px dashed #1a237e;
-        border-radius: 8px;
-        padding: 1.5rem;
-        margin-bottom: 1.5rem;
-        display: none;
-    }
-    
-    .setup-step {
-        margin: 0.75rem 0;
-        padding-left: 2rem;
+
+    .reg-header {
+        background: var(--navy);
+        padding: 24px 28px;
         position: relative;
-        min-height: 24px;
-        display: flex;
-        align-items: center;
+        overflow: hidden;
     }
-    
-    .setup-step::before {
+
+    .reg-header::before {
         content: '';
         position: absolute;
-        left: 0;
-        width: 24px;
-        height: 24px;
+        top: -40px; right: -30px;
+        width: 140px; height: 140px;
         border-radius: 50%;
-        background: #e0e0e0;
+        background: rgba(255,255,255,0.04);
+    }
+
+    .reg-header-title {
+        font-family: 'IBM Plex Serif', serif;
+        font-size: 18px;
+        font-weight: 600;
+        color: white;
+        margin-bottom: 3px;
+    }
+
+    .reg-header-sub {
+        font-size: 12px;
+        color: rgba(255,255,255,0.5);
+    }
+
+    .reg-body { padding: 28px; }
+
+    .domain-pills {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 20px;
+    }
+
+    .domain-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 10px;
+        background: var(--navy-soft);
+        border: 1px solid #c7d4e8;
+        border-radius: 4px;
+        font-size: 11px;
+        font-family: 'IBM Plex Mono', monospace;
+        color: var(--navy);
+        font-weight: 500;
+    }
+
+    .info-banner {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 12px 14px;
+        background: var(--accent-lt);
+        border: 1px solid #bfdbfe;
+        border-radius: var(--radius);
+        font-size: 12px;
+        color: #1e3a8a;
+        margin-bottom: 20px;
+        line-height: 1.5;
+    }
+
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 500px) { .form-row { grid-template-columns: 1fr; } }
+
+    .form-group-zta { margin-bottom: 16px; }
+
+    .form-label-zta {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--slate-mid);
+        margin-bottom: 6px;
+        font-family: 'IBM Plex Mono', monospace;
+    }
+
+    .label-optional {
+        font-size: 10px;
+        font-weight: 400;
+        letter-spacing: 0;
+        text-transform: none;
+        color: var(--slate-lt);
+        font-family: 'IBM Plex Sans', sans-serif;
+    }
+
+    .form-input-zta {
+        width: 100%;
+        padding: 9px 12px;
+        border: 1px solid var(--divider);
+        border-radius: var(--radius);
+        font-size: 13px;
+        font-family: 'IBM Plex Sans', sans-serif;
+        color: var(--slate);
+        background: var(--white);
+        outline: none;
+        transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    .form-input-zta:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(23,87,194,0.10);
+    }
+
+    .form-input-zta::placeholder { color: #d1d5db; }
+
+    .form-hint {
+        font-size: 11px;
+        color: var(--slate-lt);
+        margin-top: 4px;
+    }
+
+    .pw-reqs {
+        margin-top: 6px;
+        padding: 10px 12px;
+        background: var(--surface);
+        border: 1px solid var(--divider);
+        border-radius: var(--radius);
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 4px;
+    }
+
+    .pw-req {
+        font-size: 11px;
+        color: var(--slate-lt);
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        transition: color 0.2s;
+    }
+
+    .pw-req.met { color: var(--green); }
+    .pw-req-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+
+    .checkbox-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 12px 14px;
+        background: var(--surface);
+        border: 1px solid var(--divider);
+        border-radius: var(--radius);
+        margin-bottom: 16px;
+        cursor: pointer;
+    }
+
+    .checkbox-row input[type="checkbox"] {
+        width: 15px;
+        height: 15px;
+        margin-top: 1px;
+        accent-color: var(--accent);
+        flex-shrink: 0;
+        cursor: pointer;
+    }
+
+    .checkbox-text { font-size: 12px; color: var(--slate); line-height: 1.5; }
+    .checkbox-text strong { font-weight: 600; color: var(--slate); display: block; margin-bottom: 2px; }
+    .checkbox-sub { font-size: 11px; color: var(--slate-lt); }
+
+    .btn-create {
+        width: 100%;
+        padding: 12px;
+        background: var(--navy);
+        color: white;
+        border: none;
+        border-radius: var(--radius);
+        font-size: 14px;
+        font-weight: 500;
+        font-family: 'IBM Plex Sans', sans-serif;
+        cursor: pointer;
+        transition: background 0.15s;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-weight: bold;
+        gap: 8px;
+        margin-bottom: 12px;
     }
-    
-    .setup-step.active::before {
-        background: #1a237e;
-        color: white;
-        content: '🔄';
+
+    .btn-create:hover { background: #0a1d36; }
+    .btn-create:disabled { background: var(--slate-lt); cursor: not-allowed; }
+
+    .setup-progress {
+        display: none;
+        border: 1px solid var(--divider);
+        border-radius: var(--radius);
+        padding: 16px;
+        margin-top: 12px;
+        background: var(--surface);
     }
-    
-    .setup-step.completed::before {
-        background: #4caf50;
-        color: white;
-        content: '✓';
+
+    .setup-progress.show { display: block; }
+
+    .setup-step {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 5px 0;
+        font-size: 12px;
+        color: var(--slate-lt);
     }
-    
-    .setup-step.failed::before {
-        background: #f44336;
-        color: white;
-        content: '✗';
+
+    .setup-step.active { color: var(--accent); }
+    .setup-step.done { color: var(--green); }
+    .setup-step.fail { color: var(--red); }
+
+    .step-icon {
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: var(--divider);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 9px;
+        flex-shrink: 0;
     }
+
+    .setup-step.active .step-icon { background: var(--accent-lt); color: var(--accent); }
+    .setup-step.done .step-icon { background: var(--green-lt); color: var(--green); }
+    .setup-step.fail .step-icon { background: var(--red-lt); color: var(--red); }
+
+    .msg-area {
+        border-radius: var(--radius);
+        padding: 10px 14px;
+        font-size: 12px;
+        margin-top: 10px;
+        display: none;
+    }
+
+    .msg-area.show { display: block; }
+    .msg-area.success { background: var(--green-lt); color: #065f46; border: 1px solid #a7f3d0; }
+    .msg-area.error { background: var(--red-lt); color: #7f1d1d; border: 1px solid #fca5a5; }
+
+    .back-link {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--slate-mid);
+        text-decoration: none;
+        padding-top: 4px;
+    }
+
+    .back-link:hover { color: var(--accent); }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="registration-container">
-    <div class="registration-card">
-        <div class="form-header">
-            <h1>🔐 Government Employee Registration</h1>
-            <p>Create your account using official government email</p>
+<div class="reg-layout">
+    <div class="reg-card">
+        <div class="reg-header">
+            <div class="reg-header-title">Government Employee Registration</div>
+            <div class="reg-header-sub">Secure account creation with automated certificate setup</div>
         </div>
-        
-        <div class="info-box">
-            <strong>Allowed Email Domains:</strong>
-            <div style="margin-top: 0.5rem;">
-                <span class="email-domain">@mod.gov</span>
-                <span class="email-domain">@mof.gov</span>
-                <span class="email-domain">@nsa.gov</span>
-            </div>
-            <p style="margin-top: 0.5rem; margin-bottom: 0; color: #333;">
-                Your facility and department will be automatically detected from your email.
-            </p>
-        </div>
-        
-        <!-- Automated Security Setup Progress -->
-        <div id="automated-setup" class="automated-setup">
-            <h3 style="margin-top: 0; color: #1a237e;">🔄 Setting Up Automated Security</h3>
-            <div id="setup-steps">
-                <div class="setup-step" id="step1">Ready for registration</div>
-                <div class="setup-step" id="step2">Generating RSA keys...</div>
-                <div class="setup-step" id="step3">Creating certificate request...</div>
-                <div class="setup-step" id="step4">Setting up secure storage...</div>
-                <div class="setup-step" id="step5">Completing registration...</div>
-            </div>
-            <div id="setup-status" style="margin-top: 1rem; font-weight: bold; color: #1a237e;"></div>
-        </div>
-        
-        <div id="alert" class="alert"></div>
-        
-        <form id="registrationForm">
-            <div class="form-group">
-                <label for="full_name">Full Name *</label>
-                <input type="text" id="full_name" name="full_name" class="form-control" required
-                       placeholder="e.g., John Doe">
-            </div>
-            
-            <div class="form-group">
-                <label for="email">Official Email *</label>
-                <input type="email" id="email" name="email" class="form-control" required
-                       placeholder="e.g., john.doe@mod.gov">
-                <small style="color: #666; display: block; margin-top: 0.25rem;">
-                    Must be a valid government email address
-                </small>
-            </div>
-            
-            <div class="form-group">
-                <label for="username">Username *</label>
-                <input type="text" id="username" name="username" class="form-control" required
-                       placeholder="e.g., johndoe">
-                <small style="color: #666; display: block; margin-top: 0.25rem;">
-                    Choose a username for login (letters and numbers only)
-                </small>
-            </div>
-            
-            <div class="form-group">
-                <label for="password">Password *</label>
-                <input type="password" id="password" name="password" class="form-control" required
-                       placeholder="Minimum 8 characters">
-                <div class="password-requirements">
-                    <strong>Password Requirements:</strong>
-                    <ul style="margin: 0.5rem 0 0 1.5rem; padding: 0;">
-                        <li>At least 8 characters</li>
-                        <li>At least 1 uppercase letter</li>
-                        <li>At least 1 number</li>
-                        <li>At least 1 special character</li>
-                    </ul>
+
+        <div class="reg-body">
+            <div class="info-banner">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;margin-top:1px"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <div>
+                    <strong style="display:block;margin-bottom:2px">Authorised email domains only</strong>
+                    Your department and facility are auto-detected from your email address.
                 </div>
             </div>
-            
-            <div class="form-group">
-                <label for="confirm_password">Confirm Password *</label>
-                <input type="password" id="confirm_password" name="confirm_password" class="form-control" required
-                       placeholder="Re-enter your password">
+
+            <div class="domain-pills">
+                <span class="domain-pill">@mod.gov</span>
+                <span class="domain-pill">@mof.gov</span>
+                <span class="domain-pill">@nsa.gov</span>
             </div>
-            
-            <div class="form-group">
-                <label for="employee_id">Employee ID (Optional)</label>
-                <input type="text" id="employee_id" name="employee_id" class="form-control"
-                       placeholder="e.g., MOD-2024-001">
-                <small style="color: #666; display: block; margin-top: 0.25rem;">
-                    Your official government employee ID (for verification)
-                </small>
-            </div>
-            
-            <div class="form-group">
-                <div style="background: #f8f9fa; padding: 1rem; border-radius: 5px;">
-                    <input type="checkbox" id="terms" name="terms" required>
-                    <label for="terms" style="display: inline; font-weight: normal;">
-                        I confirm that I am a government employee and agree to comply with 
-                        all security protocols. I understand that misuse of this system 
-                        may result in disciplinary action.
-                    </label>
+
+            <form id="regForm">
+                <div class="form-row">
+                    <div class="form-group-zta">
+                        <div class="form-label-zta">Full Name</div>
+                        <input class="form-input-zta" type="text" id="full_name" required placeholder="John Doe">
+                    </div>
+                    <div class="form-group-zta">
+                        <div class="form-label-zta">Username</div>
+                        <input class="form-input-zta" type="text" id="username" required placeholder="johndoe">
+                        <div class="form-hint">Letters, numbers, underscores</div>
+                    </div>
                 </div>
-            </div>
-            
-            <div class="form-group">
-                <div style="background: #e8f5e9; padding: 1rem; border-radius: 5px; margin-bottom: 1rem;">
-                    <input type="checkbox" id="automated_security" name="automated_security" checked>
-                    <label for="automated_security" style="display: inline; font-weight: normal;">
-                        <strong>Enable Automated Security Setup</strong><br>
-                        <small style="color: #666;">
-                            Automatically generate RSA keys and certificates in your browser.
-                            This provides enhanced security and requires no manual steps.
-                        </small>
-                    </label>
+
+                <div class="form-group-zta">
+                    <div class="form-label-zta">Official Email</div>
+                    <input class="form-input-zta" type="email" id="email" required placeholder="john.doe@mod.gov">
                 </div>
-            </div>
-            
-            <div class="form-group">
-                <button type="submit" class="submit-btn" id="submitBtn">
-                    Create Account
+
+                <div class="form-row">
+                    <div class="form-group-zta">
+                        <div class="form-label-zta">Password</div>
+                        <input class="form-input-zta" type="password" id="password" required placeholder="Min. 8 characters">
+                        <div class="pw-reqs" id="pwReqs">
+                            <div class="pw-req" id="req-len"><div class="pw-req-dot"></div>8+ characters</div>
+                            <div class="pw-req" id="req-upper"><div class="pw-req-dot"></div>Uppercase</div>
+                            <div class="pw-req" id="req-num"><div class="pw-req-dot"></div>Number</div>
+                            <div class="pw-req" id="req-special"><div class="pw-req-dot"></div>Special char</div>
+                        </div>
+                    </div>
+                    <div class="form-group-zta">
+                        <div class="form-label-zta">Confirm Password</div>
+                        <input class="form-input-zta" type="password" id="confirm_password" required placeholder="Repeat password">
+                    </div>
+                </div>
+
+                <div class="form-group-zta">
+                    <div class="form-label-zta">Employee ID <span class="label-optional">Optional</span></div>
+                    <input class="form-input-zta" type="text" id="employee_id" placeholder="MOD-2024-001">
+                </div>
+
+                <label class="checkbox-row">
+                    <input type="checkbox" id="automated_security" checked>
+                    <div class="checkbox-text">
+                        <strong>Enable Automated Security Setup</strong>
+                        <span class="checkbox-sub">Generates RSA keys and certificates automatically in your browser — recommended.</span>
+                    </div>
+                </label>
+
+                <label class="checkbox-row">
+                    <input type="checkbox" id="terms" required>
+                    <div class="checkbox-text">
+                        I confirm I am a government employee and agree to comply with all security protocols and acceptable use policies.
+                    </div>
+                </label>
+
+                <button type="submit" class="btn-create" id="submitBtn">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L4 6v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V6l-8-4z"/></svg>
+                    Create Secure Account
                 </button>
-            </div>
-        </form>
-        
-        <div style="text-align: center; margin-top: 1.5rem;">
-            <p>Already have an account?</p>
-            <a href="/login" class="back-link">← Back to Login</a>
+
+                <div class="setup-progress" id="setupProgress">
+                    <div class="setup-step" id="s1"><div class="step-icon">1</div>Generating RSA key pair…</div>
+                    <div class="setup-step" id="s2"><div class="step-icon">2</div>Creating certificate request…</div>
+                    <div class="setup-step" id="s3"><div class="step-icon">3</div>Registering with server…</div>
+                    <div class="setup-step" id="s4"><div class="step-icon">4</div>Storing credentials securely…</div>
+                </div>
+
+                <div class="msg-area" id="msgArea"></div>
+
+                <a href="/login" class="back-link">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+                    Back to Sign In
+                </a>
+            </form>
         </div>
     </div>
 </div>
 
-<!-- Load automated registration JavaScript -->
 <script src="{{ url_for('static', filename='js/zta-encryption.js') }}"></script>
 <script src="{{ url_for('static', filename='js/automated-registration.js') }}"></script>
-
 <script>
-// Simple progress indicator functions
-function updateStep(step, message, status = 'active') {
-    const element = document.getElementById(`step${step}`);
-    if (element) {
-        element.textContent = message;
-        element.className = 'setup-step ' + status;
-    }
+const allowedDomains = ['@mod.gov', '@mof.gov', '@nsa.gov'];
+
+function setStep(n, state) {
+    const el = document.getElementById('s' + n);
+    if (!el) return;
+    el.className = 'setup-step ' + state;
+    const icons = { active:'…', done:'✓', fail:'✕' };
+    el.querySelector('.step-icon').textContent = icons[state] || n;
 }
 
-function showAutomatedSetup(show) {
-    const setupDiv = document.getElementById('automated-setup');
-    if (setupDiv) {
-        setupDiv.style.display = show ? 'block' : 'none';
-    }
+function showMsg(msg, type) {
+    const el = document.getElementById('msgArea');
+    el.textContent = msg;
+    el.className = 'msg-area show ' + type;
 }
 
-function updateStatus(message) {
-    const statusDiv = document.getElementById('setup-status');
-    if (statusDiv) {
-        statusDiv.textContent = message;
-    }
-}
+// Password strength indicators
+document.getElementById('password').addEventListener('input', function() {
+    const p = this.value;
+    const check = (id, ok) => document.getElementById(id).classList.toggle('met', ok);
+    check('req-len', p.length >= 8);
+    check('req-upper', /[A-Z]/.test(p));
+    check('req-num', /\d/.test(p));
+    check('req-special', /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(p));
+});
 
-document.addEventListener('DOMContentLoaded', function() {
-    const form = document.getElementById('registrationForm');
-    const alertDiv = document.getElementById('alert');
-    const submitBtn = document.getElementById('submitBtn');
-    const automatedSecurityCheckbox = document.getElementById('automated_security');
-    
-    // Allowed government email domains
-    const allowedDomains = ['@mod.gov', '@mof.gov', '@nsa.gov'];
-    
-    // Validate government email
-    function validateEmail(email) {
-        return allowedDomains.some(domain => email.endsWith(domain));
+document.getElementById('regForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+
+    const email = document.getElementById('email').value;
+    const password = document.getElementById('password').value;
+    const confirmPw = document.getElementById('confirm_password').value;
+    const username = document.getElementById('username').value;
+    const useAuto = document.getElementById('automated_security').checked;
+
+    if (!allowedDomains.some(d => email.endsWith(d))) {
+        showMsg('Email must be from an authorised government domain.', 'error'); return;
     }
-    
-    // Validate password strength
-    function validatePassword(password) {
-        const minLength = 8;
-        const hasUpperCase = /[A-Z]/.test(password);
-        const hasLowerCase = /[a-z]/.test(password);
-        const hasNumbers = /\d/.test(password);
-        const hasSpecialChar = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password);
-        
-        return password.length >= minLength && hasUpperCase && hasLowerCase && hasNumbers && hasSpecialChar;
+    if (password.length < 8 || !/[A-Z]/.test(password) || !/\d/.test(password) || !/[!@#$%^&*()_+\-=]/.test(password)) {
+        showMsg('Password does not meet security requirements.', 'error'); return;
     }
-    
-    // Show alert message
-    function showAlert(message, type) {
-        alertDiv.textContent = message;
-        alertDiv.className = `alert alert-${type}`;
-        alertDiv.style.display = 'block';
-        
-        setTimeout(() => {
-            alertDiv.style.display = 'none';
-        }, 5000);
+    if (password !== confirmPw) {
+        showMsg('Passwords do not match.', 'error'); return;
     }
-    
-    // Auto-detect facility from email
-    function detectFacilityFromEmail(email) {
-        if (email.endsWith('@mod.gov')) return 'Ministry of Defence';
-        if (email.endsWith('@mof.gov')) return 'Ministry of Finance';
-        if (email.endsWith('@nsa.gov')) return 'National Security Agency';
-        return null;
+    if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+        showMsg('Username contains invalid characters.', 'error'); return;
     }
-    
-    // Handle automated registration
-    async function handleAutomatedRegistration(formData) {
+
+    const btn = document.getElementById('submitBtn');
+    btn.disabled = true;
+
+    const formData = {
+        full_name: document.getElementById('full_name').value,
+        email, username, password,
+        employee_id: document.getElementById('employee_id').value || null
+    };
+
+    if (useAuto) {
+        document.getElementById('setupProgress').classList.add('show');
         try {
-            showAutomatedSetup(true);
-            updateStep(1, 'Initializing security setup...', 'active');
-            
-            // Initialize automated setup
+            setStep(1, 'active');
             if (!window.automatedRegistration) {
                 window.automatedRegistration = new AutomatedRegistration();
                 await window.automatedRegistration.init();
             }
-            
-            updateStep(2, 'Generating RSA key pair...', 'active');
-            updateStatus('Generating secure RSA keys in your browser...');
-            
-            // Use automated registration
+            setStep(1, 'done'); setStep(2, 'active');
             const result = await window.automatedRegistration.handleRegistration(formData);
-            
+            setStep(2, 'done'); setStep(3, 'active'); setStep(4, 'active');
             if (result.success) {
-                updateStep(5, 'Registration complete!', 'completed');
-                updateStatus('✅ Security setup complete!');
-                
-                return {
-                    success: true,
-                    user_id: result.user_id,
-                    has_certificate: result.has_certificate,
-                    message: 'Automated registration successful'
-                };
+                setStep(3, 'done'); setStep(4, 'done');
+                showMsg('Account created successfully. Redirecting to login…', 'success');
+                setTimeout(() => window.location.href = '/login', 2000);
             } else {
-                updateStep(5, 'Registration failed', 'failed');
-                updateStatus('❌ ' + result.error);
                 throw new Error(result.error);
             }
-            
-        } catch (error) {
-            console.error('Automated registration failed:', error);
-            throw error;
+        } catch (err) {
+            setStep(3, 'fail');
+            showMsg('Registration failed: ' + err.message, 'error');
+            btn.disabled = false;
         }
-    }
-    
-    // Handle regular registration
-    async function handleRegularRegistration(formData) {
+    } else {
         try {
-            console.log('Sending regular registration data:', formData);
-            
-            // Send registration request
-            const response = await fetch('/api/register/', {
+            const res = await fetch('/api/register/', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(formData)
             });
-            
-            console.log('Response status:', response.status);
-            const data = await response.json();
-            console.log('Response data:', data);
-            
-            if (response.ok) {
-                return {
-                    success: true,
-                    data: data
-                };
+            const data = await res.json();
+            if (res.ok) {
+                showMsg('Account created. Redirecting…', 'success');
+                setTimeout(() => window.location.href = '/login', 1800);
             } else {
                 throw new Error(data.error || 'Registration failed');
             }
-            
-        } catch (error) {
-            console.error('Registration error:', error);
-            throw error;
+        } catch (err) {
+            showMsg(err.message, 'error');
+            btn.disabled = false;
         }
     }
-    
-    // Handle form submission
-    form.addEventListener('submit', async function(e) {
-        e.preventDefault();
-        
-        // Get form values
-        const email = document.getElementById('email').value;
-        const password = document.getElementById('password').value;
-        const confirmPassword = document.getElementById('confirm_password').value;
-        const username = document.getElementById('username').value;
-        const useAutomated = automatedSecurityCheckbox.checked;
-        
-        // Validate email domain
-        if (!validateEmail(email)) {
-            showAlert(`Email must be from a government domain. Allowed: ${allowedDomains.join(', ')}`, 'error');
-            return;
-        }
-        
-        // Validate password
-        if (!validatePassword(password)) {
-            showAlert('Password must be at least 8 characters with uppercase, lowercase, number, and special character.', 'error');
-            return;
-        }
-        
-        // Confirm password
-        if (password !== confirmPassword) {
-            showAlert('Passwords do not match!', 'error');
-            return;
-        }
-        
-        // Validate username (letters and numbers only)
-        if (!/^[a-zA-Z0-9_]+$/.test(username)) {
-            showAlert('Username can only contain letters, numbers, and underscores.', 'error');
-            return;
-        }
-        
-        // Disable submit button
-        submitBtn.disabled = true;
-        submitBtn.textContent = useAutomated ? 'Setting Up Security...' : 'Creating Account...';
-        
-        try {
-            // Get form data
-            const formData = {
-                full_name: document.getElementById('full_name').value,
-                email: email,
-                username: username,
-                password: password,
-                employee_id: document.getElementById('employee_id').value || null
-            };
-            
-            let result;
-            
-            if (useAutomated) {
-                // Use automated registration with RSA keys
-                result = await handleAutomatedRegistration(formData);
-            } else {
-                // Use regular registration
-                result = await handleRegularRegistration(formData);
-            }
-            
-            if (result.success) {
-                showAlert('✅ Account created successfully! Redirecting to login...', 'success');
-                
-                // Show success message and redirect
-                setTimeout(() => {
-                    alert(`
-✅ Account Created Successfully!
-
-Welcome to the Government Document System!
-
-You can now login with:
-• Username: ${username}
-• Email: ${email}
-
-${useAutomated ? '✓ RSA keys generated automatically\n✓ Certificate stored securely in browser' : 'Note: You may need to set up security certificates separately'}
-
-You will be redirected to the login page.
-                    `);
-                    window.location.href = '/';
-                }, 1500);
-                
-            } else {
-                showAlert(`Error: ${result.error || 'Registration failed'}`, 'error');
-                submitBtn.disabled = false;
-                submitBtn.textContent = 'Create Account';
-                showAutomatedSetup(false);
-            }
-            
-        } catch (error) {
-            console.error('Registration error:', error);
-            showAlert(`Registration failed: ${error.message}`, 'error');
-            submitBtn.disabled = false;
-            submitBtn.textContent = 'Create Account';
-            showAutomatedSetup(false);
-        }
-    });
-    
-    // Auto-detect facility when email changes
-    document.getElementById('email').addEventListener('blur', function() {
-        const email = this.value;
-        if (validateEmail(email)) {
-            const facility = detectFacilityFromEmail(email);
-            if (facility) {
-                showAlert(`Detected facility: ${facility}`, 'success');
-            }
-        }
-    });
-    
-    // Password strength indicator
-    document.getElementById('password').addEventListener('input', function() {
-        const password = this.value;
-        const requirements = document.querySelector('.password-requirements ul');
-        
-        if (requirements) {
-            const items = requirements.querySelectorAll('li');
-            
-            // Check each requirement
-            items[0].style.color = password.length >= 8 ? '#4caf50' : '#666';
-            items[1].style.color = /[A-Z]/.test(password) ? '#4caf50' : '#666';
-            items[2].style.color = /\d/.test(password) ? '#4caf50' : '#666';
-            items[3].style.color = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password) ? '#4caf50' : '#666';
-        }
-    });
 });
 </script>
-
 {% endblock %}

@@ -1,6 +1,5 @@
 {% extends "base.html" %}
-
-{% block title %}Resource Portal - Government ZTA System{% endblock %}
+{% block title %}Resource Portal — ZTA Government System{% endblock %}
 
 {% block extra_scripts %}
 <script src="{{ url_for('static', filename='js/zta-encryption.js') }}"></script>
@@ -8,811 +7,687 @@
 
 {% block extra_css %}
 <style>
-    .portal-header {
-        background: linear-gradient(135deg, #1a237e 0%, #283593 100%);
+    .portal-banner {
+        background: var(--navy);
+        border-radius: var(--radius-lg);
+        padding: 22px 28px;
         color: white;
-        padding: 2rem;
-        border-radius: 10px;
-        margin-bottom: 2rem;
-    }
-    
-    .portal-header h1 {
-        margin: 0 0 1rem 0;
-        font-size: 2rem;
-    }
-    
-    .department-badge {
-        display: inline-block;
-        background: rgba(255,255,255,0.2);
-        padding: 0.25rem 1rem;
-        border-radius: 20px;
-        font-weight: bold;
-        margin-right: 0.5rem;
-    }
-    
-    .filters-section {
-        background: white;
-        padding: 1.5rem;
-        border-radius: 10px;
-        margin-bottom: 2rem;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    
-    .filter-controls {
+        margin-bottom: 20px;
         display: flex;
-        gap: 1rem;
-        flex-wrap: wrap;
         align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        position: relative;
+        overflow: hidden;
     }
-    
-    .filter-select {
-        padding: 0.5rem 1rem;
-        border: 1px solid #ddd;
-        border-radius: 5px;
-        min-width: 200px;
+
+    .portal-banner::before {
+        content: '';
+        position: absolute;
+        top: -50px; right: -20px;
+        width: 160px; height: 160px;
+        border-radius: 50%;
+        background: rgba(255,255,255,0.04);
     }
-    
-    .search-box {
-        flex-grow: 1;
-        padding: 0.5rem 1rem;
-        border: 1px solid #ddd;
-        border-radius: 5px;
-    }
-    
-    .filter-button {
-        background: #1a237e;
+
+    .portal-banner-title {
+        font-family: 'IBM Plex Serif', serif;
+        font-size: 20px;
+        font-weight: 600;
         color: white;
-        border: none;
-        padding: 0.5rem 1.5rem;
-        border-radius: 5px;
-        cursor: pointer;
+        margin-bottom: 4px;
     }
-    
+
+    .portal-banner-sub { font-size: 12px; color: rgba(255,255,255,0.5); }
+
+    .portal-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    .access-chip {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        padding: 4px 10px;
+        border-radius: 20px;
+        background: rgba(255,255,255,0.1);
+        font-size: 11px;
+        color: rgba(255,255,255,0.8);
+        font-family: 'IBM Plex Mono', monospace;
+    }
+
+    .time-notice {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        border-radius: var(--radius);
+        background: var(--amber-lt);
+        border: 1px solid #fcd34d;
+        font-size: 12px;
+        color: #78350f;
+        margin-bottom: 20px;
+    }
+
+    .filter-bar {
+        background: var(--white);
+        border: 1px solid var(--divider);
+        border-radius: var(--radius-lg);
+        padding: 14px 20px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+    }
+
+    .filter-label {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--slate-lt);
+        font-family: 'IBM Plex Mono', monospace;
+        white-space: nowrap;
+    }
+
+    .filter-tabs {
+        display: flex;
+        gap: 2px;
+        background: var(--surface);
+        border: 1px solid var(--divider);
+        border-radius: 6px;
+        padding: 2px;
+    }
+
+    .filter-tab {
+        padding: 5px 12px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+        background: transparent;
+        color: var(--slate-mid);
+        transition: all 0.15s;
+        white-space: nowrap;
+    }
+
+    .filter-tab.active { background: var(--white); color: var(--navy); box-shadow: var(--shadow-sm); }
+    .filter-tab:hover:not(.active) { color: var(--slate); }
+
+    .filter-search {
+        flex: 1;
+        min-width: 180px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 12px;
+        border: 1px solid var(--divider);
+        border-radius: var(--radius);
+        background: var(--white);
+        font-size: 13px;
+        color: var(--slate-mid);
+    }
+
+    .filter-search input {
+        flex: 1;
+        border: none;
+        outline: none;
+        font-size: 13px;
+        font-family: 'IBM Plex Sans', sans-serif;
+        color: var(--slate);
+        background: transparent;
+    }
+
+    .filter-search input::placeholder { color: #d1d5db; }
+
+    .results-meta {
+        font-size: 12px;
+        color: var(--slate-lt);
+        margin-bottom: 16px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .results-count { font-weight: 600; color: var(--slate); }
+
     .resource-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-        gap: 1.5rem;
+        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+        gap: 14px;
     }
-    
+
     .resource-card {
-        background: white;
-        border-radius: 10px;
-        padding: 1.5rem;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        border: 1px solid #e0e0e0;
+        background: var(--white);
+        border: 1px solid var(--divider);
+        border-radius: var(--radius-lg);
+        overflow: hidden;
+        transition: box-shadow 0.2s, border-color 0.2s;
     }
-    
-    .resource-header {
+
+    .resource-card:hover { box-shadow: var(--shadow-md); border-color: #e0e7ff; }
+
+    .resource-card-top {
         display: flex;
+        align-items: flex-start;
         justify-content: space-between;
-        align-items: center;
-        margin-bottom: 1rem;
+        padding: 16px 16px 12px;
+        gap: 10px;
     }
-    
-    .resource-title {
-        font-size: 1.2rem;
-        font-weight: bold;
-        color: #1a237e;
+
+    .resource-card-title {
+        font-family: 'IBM Plex Serif', serif;
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--navy);
+        line-height: 1.35;
         margin: 0;
     }
-    
-    .classification-badge {
-        padding: 0.25rem 0.75rem;
-        border-radius: 12px;
-        font-size: 0.8rem;
-        font-weight: bold;
+
+    .tier-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        padding: 3px 8px;
+        border-radius: 4px;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-family: 'IBM Plex Mono', monospace;
+        white-space: nowrap;
+        flex-shrink: 0;
     }
-    
-    .classification-public { background: #4caf50; color: white; }
-    .classification-department { background: #2196f3; color: white; }
-    .classification-top-secret { background: #9c27b0; color: white; }
-    
-    .resource-info {
-        margin-bottom: 1rem;
-        color: #666;
+
+    .tier-public { background: var(--green-lt); color: var(--green); }
+    .tier-department { background: var(--accent-lt); color: var(--accent); }
+    .tier-top_secret { background: var(--purple-lt); color: var(--purple); }
+
+    .resource-card-meta {
+        padding: 0 16px 12px;
     }
-    
-    .info-row {
+
+    .resource-meta-row {
         display: flex;
         justify-content: space-between;
-        margin-bottom: 0.5rem;
+        font-size: 12px;
+        color: var(--slate-mid);
+        padding: 4px 0;
+        border-bottom: 1px solid var(--divider);
     }
-    
-    .info-label {
-        font-weight: 600;
-        color: #333;
+
+    .resource-meta-row:last-child { border-bottom: none; }
+    .resource-meta-key { font-weight: 500; color: var(--slate-lt); font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
+    .dept-match { color: var(--accent); font-weight: 500; }
+
+    .resource-desc {
+        padding: 0 16px 14px;
+        font-size: 12px;
+        color: var(--slate-mid);
+        line-height: 1.5;
     }
-    
-    .action-button {
-        background: #1a237e;
-        color: white;
-        border: none;
-        padding: 0.5rem 1rem;
-        border-radius: 5px;
-        cursor: pointer;
+
+    .resource-card-action { padding: 0 14px 14px; }
+
+    .btn-access {
         width: 100%;
-        margin-top: 1rem;
+        padding: 9px;
+        border-radius: var(--radius);
+        font-size: 12px;
+        font-weight: 600;
+        font-family: 'IBM Plex Sans', sans-serif;
+        cursor: pointer;
+        border: none;
+        transition: all 0.15s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
     }
-    
-    .action-button:disabled {
-        background: #ccc;
-        cursor: not-allowed;
+
+    .btn-access-open { background: var(--navy); color: white; }
+    .btn-access-open:hover { background: #0a1d36; }
+    .btn-access-denied { background: var(--surface); color: var(--slate-lt); border: 1px solid var(--divider); cursor: not-allowed; }
+    .btn-access-time { background: var(--amber-lt); color: var(--amber); border: 1px solid #fcd34d; cursor: not-allowed; }
+
+    .access-reason {
+        margin: 8px 14px 14px;
+        padding: 8px 10px;
+        background: var(--surface);
+        border-radius: var(--radius);
+        font-size: 11px;
+        color: var(--slate-lt);
+        line-height: 1.4;
     }
-    
-    .access-pending {
-        background: #ff9800;
-        color: white;
-    }
-    
-    .access-denied {
-        background: #f44336;
-        color: white;
-    }
-    
-    .loading {
+
+    .empty-resources {
         text-align: center;
-        padding: 3rem;
-        color: #666;
+        padding: 60px 20px;
+        background: var(--white);
+        border: 1px solid var(--divider);
+        border-radius: var(--radius-lg);
     }
-    
-    .access-warning {
-        background: #fff3cd;
-        border: 1px solid #ffeaa7;
-        color: #856404;
-        padding: 1rem;
-        border-radius: 5px;
-        margin-bottom: 1rem;
+
+    .empty-icon { font-size: 32px; margin-bottom: 12px; opacity: 0.4; }
+    .empty-title { font-family: 'IBM Plex Serif', serif; font-size: 16px; color: var(--navy); margin-bottom: 6px; }
+    .empty-sub { font-size: 13px; color: var(--slate-lt); margin-bottom: 16px; }
+
+    /* ── MODAL ── */
+    .modal-overlay {
+        position: fixed; inset: 0;
+        background: rgba(15,36,68,0.6);
+        z-index: 500;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        animation: fadeIn 0.2s ease;
     }
-    
-    .top-secret-warning {
-        background: #f8d7da;
-        border: 1px solid #f5c6cb;
-        color: #721c24;
-        padding: 1rem;
-        border-radius: 5px;
-        margin-top: 1rem;
+
+    .modal-box {
+        background: var(--white);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-lg);
+        width: 100%;
+        max-width: 680px;
+        max-height: 85vh;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    .modal-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--divider);
+        background: var(--navy);
+    }
+
+    .modal-head-title { font-family: 'IBM Plex Serif', serif; font-size: 16px; color: white; font-weight: 600; }
+    .modal-head-sub { font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 2px; }
+
+    .modal-close {
+        width: 30px; height: 30px;
+        border-radius: 6px;
+        background: rgba(255,255,255,0.1);
+        border: none;
+        color: white;
+        font-size: 16px;
+        cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+        transition: background 0.15s;
+    }
+
+    .modal-close:hover { background: rgba(255,255,255,0.2); }
+
+    .modal-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 20px;
+    }
+
+    .modal-loading {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        padding: 48px;
+        color: var(--slate-mid);
+        font-size: 13px;
+    }
+
+    .modal-field { margin-bottom: 14px; }
+    .modal-field-label { font-size: 10px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--slate-lt); font-family: 'IBM Plex Mono', monospace; margin-bottom: 4px; }
+    .modal-field-value { font-size: 14px; color: var(--slate); }
+
+    .modal-content-body {
+        padding: 14px;
+        background: var(--surface);
+        border: 1px solid var(--divider);
+        border-radius: var(--radius);
+        font-size: 13px;
+        color: var(--slate);
+        line-height: 1.7;
+        white-space: pre-wrap;
+    }
+
+    .zta-context-bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        background: var(--green-lt);
+        border: 1px solid #a7f3d0;
+        border-radius: var(--radius);
+        font-size: 11px;
+        color: #065f46;
+        margin-top: 14px;
     }
 </style>
 {% endblock %}
 
 {% block content %}
-<div id="resourcePortal">
-    <div class="loading">Loading Resource Portal...</div>
+<div class="zta-page" id="resourcePortal">
+    <div class="loading-state">
+        <div class="zta-spinner"></div>
+        Loading Resource Portal…
+    </div>
 </div>
 
 <script>
-// Global variables
 let currentUser = null;
 let resources = [];
-let filters = {
-    classification: 'all',
-    search: ''
-};
+let filters = { classification: 'all', search: '' };
 
-
-// Load resource portal
 async function loadResourcePortal() {
-    try {
-        // Wait for ztaEncryptor to be available
-        let retries = 0;
-        const maxRetries = 10;
-        
-        while (!window.ztaEncryptor && retries < maxRetries) {
-            console.log(`Waiting for ztaEncryptor... (${retries + 1}/${maxRetries})`);
-            await new Promise(resolve => setTimeout(resolve, 500));
-            retries++;
-        }
-        
-        if (!window.ztaEncryptor) {
-            console.error('❌ ztaEncryptor failed to load');
-            document.getElementById('resourcePortal').innerHTML = `
-                <div style="background: #f8d7da; color: #721c24; padding: 2rem; border-radius: 5px;">
-                    <h3>❌ Security Module Failed to Load</h3>
-                    <p>The encryption module could not be loaded. Please refresh the page.</p>
-                    <button onclick="window.location.reload()" class="btn btn-primary">Refresh</button>
-                </div>
-            `;
-            return;
-        }
-        
-        // Initialize encryption
-        try {
-            await window.ztaEncryptor.init();
-            console.log('✅ Encryption initialized');
-        } catch (error) {
-            console.error('❌ Encryption init failed:', error);
-        }
-        
-        const token = localStorage.getItem('access_token');
-        
-        if (!token) {
-            window.location.href = '/';
-            return;
-        }
-        
-        // Get user info
-        const userResponse = await fetch('/api/auth/me', {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
-        
-        if (userResponse.status === 401) {
-            localStorage.removeItem('access_token');
-            window.location.href = '/';
-            return;
-        }
-        
-        if (!userResponse.ok) {
-            throw new Error('Failed to get user info');
-        }
-        
-        const userData = await userResponse.json();
-        
-        if (!userData.authenticated) {
-            window.location.href = '/';
-            return;
-        }
-        
-        currentUser = userData.user;
-        
-        // Load resources
-        await loadResources();
-        
-        // Render portal
-        renderPortal();
-        
-    } catch (error) {
-        console.error('Resource portal error:', error);
-        document.getElementById('resourcePortal').innerHTML = `
-            <div style="background: #f8d7da; color: #721c24; padding: 2rem; border-radius: 5px;">
-                <h3>Error Loading Resource Portal</h3>
-                <p>${error.message}</p>
-                <button onclick="window.location.href='/dashboard'" class="btn btn-primary">Back to Dashboard</button>
-            </div>
-        `;
+    let retries = 0;
+    while (!window.ztaEncryptor && retries < 10) {
+        await new Promise(r => setTimeout(r, 500));
+        retries++;
     }
+
+    if (!window.ztaEncryptor) {
+        document.getElementById('resourcePortal').innerHTML =
+            `<div class="alert alert-danger">Security module failed to load. <button onclick="location.reload()" class="btn btn-secondary btn-sm" style="margin-left:8px">Reload</button></div>`;
+        return;
+    }
+
+    try { await window.ztaEncryptor.init(); } catch(e) {}
+
+    const token = localStorage.getItem('access_token');
+    if (!token) { window.location.href = '/'; return; }
+
+    try {
+        const me = await fetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${token}` } });
+        if (me.status === 401) { localStorage.removeItem('access_token'); window.location.href = '/'; return; }
+        const meData = await me.json();
+        if (!meData.authenticated) { window.location.href = '/'; return; }
+        currentUser = meData.user;
+    } catch(e) {
+        document.getElementById('resourcePortal').innerHTML =
+            `<div class="alert alert-danger">${e.message}</div>`; return;
+    }
+
+    await loadResources();
+    renderPortal();
 }
 
-
-// ========== ADD THIS FUNCTION RIGHT HERE ==========
 async function loadResources() {
     try {
         const token = localStorage.getItem('access_token');
-        const response = await fetch('/api/resources', {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
-        
-        if (!response.ok) {
-            throw new Error('Failed to load resources');
-        }
-        
-        const data = await response.json();
-        
-        // Handle encrypted response
+        const res = await fetch('/api/resources', { headers: { 'Authorization': `Bearer ${token}` } });
+        if (!res.ok) throw new Error('Failed to load resources');
+        const data = await res.json();
+
         if (data.encrypted_payload) {
-            if (window.ztaEncryptor && window.ztaEncryptor.initialized) {
-                try {
-                    const decrypted = await window.ztaEncryptor.decryptFromAgent(data.encrypted_payload);
-                    console.log('Decrypted resources:', decrypted);
-                    
-                    // Check if access was allowed
-                    if (!decrypted.allowed) {
-                        console.error('Access denied:', decrypted.reason);
-                        resources = [];
-                        showError(`Access denied: ${decrypted.reason}`);
-                        return;
-                    }
-                    
-                    // Extract resources from the API response
-                    if (decrypted.api_response && decrypted.api_response.data) {
-                        resources = decrypted.api_response.data || [];
-                        console.log(`✅ Loaded ${resources.length} resources via encrypted flow`);
-                    } else {
-                        resources = [];
-                    }
-                } catch (decryptError) {
-                    console.error('Decryption failed:', decryptError);
-                    resources = [];
-                    showError('Failed to decrypt resources');
-                }
-            } else {
-                console.error('Encryption not initialized');
-                resources = [];
-                showError('Encryption not initialized');
+            if (window.ztaEncryptor?.initialized) {
+                const dec = await window.ztaEncryptor.decryptFromAgent(data.encrypted_payload);
+                resources = dec?.api_response?.data || [];
             }
         } else {
-            // Direct response (fallback - should not happen in production)
             resources = data.resources || data || [];
-            console.log(`⚠️ Loaded ${resources.length} resources (unencrypted)`);
         }
-        
-    } catch (error) {
-        console.error('Error loading resources:', error);
-        resources = [];
-        showError(error.message);
-    }
-}
-// ========== END OF ADDED FUNCTION ==========
-
-// Add this helper function
-function showError(message) {
-    const portal = document.getElementById('resourcePortal');
-    if (portal) {
-        portal.innerHTML = `
-            <div class="alert alert-danger" style="margin: 2rem; padding: 1rem;">
-                <h4>❌ Error</h4>
-                <p>${escapeHtml(message)}</p>
-                <button onclick="loadResourcePortal()" class="btn btn-primary">Retry</button>
-            </div>
-        `;
-    }
+    } catch(e) { resources = []; }
 }
 
-// Generate classification filter options based on user
-function getClassificationOptions() {
-    const options = [
-        { value: 'all', label: 'All Classifications' },
-        { value: 'PUBLIC', label: 'Public' },
-        { value: 'DEPARTMENT', label: 'Department' }
-    ];
-    
-    // Check clearance level in a case-insensitive way
-    const userClearance = currentUser.clearance_level.toUpperCase();
-    
-    // Only MOD users with SECRET or TOP_SECRET clearance see Top Secret filter
-    if (currentUser.department === 'MOD' && 
-        (userClearance === 'SECRET' || userClearance === 'TOP_SECRET')) {
-        options.push({ value: 'TOP_SECRET', label: 'Top Secret' });
-    }
-    
-    return options;
-}
-
-// Render portal interface
 function renderPortal() {
-    const filteredResources = filterResources();
-    const classificationOptions = getClassificationOptions();
-    
+    const cl = currentUser.clearance_level.toUpperCase();
+    const showTS = currentUser.department === 'MOD' && (cl === 'SECRET' || cl === 'TOP_SECRET');
+    const hour = new Date().getHours();
+    const bizHours = hour >= 8 && hour < 16;
+    const filtered = getFiltered();
+
+    const clOptions = [
+        { v:'all', l:'All' },
+        { v:'PUBLIC', l:'Public' },
+        { v:'DEPARTMENT', l:'Department' },
+        ...(showTS ? [{ v:'TOP_SECRET', l:'Top Secret' }] : [])
+    ];
+
     document.getElementById('resourcePortal').innerHTML = `
-        <div class="portal-header">
-            <h1>Government Resource Portal</h1>
-            <div>
-                <span class="department-badge">${currentUser.department}</span>
-                <span>Clearance: ${currentUser.clearance_level}</span>
-            </div>
-            <p style="opacity: 0.9; margin-top: 0.5rem;">
-                Access resources based on your department and clearance level
-            </p>
-        </div>
-        
-        ${currentUser.department === 'MOD' && 
-    (currentUser.clearance_level.toUpperCase() === 'SECRET' || 
-     currentUser.clearance_level.toUpperCase() === 'TOP_SECRET') ? `
-        <div class="top-secret-warning">
-            ⚠️ <strong>TOP SECRET ACCESS NOTICE:</strong> Top Secret resources are only accessible during business hours (8:00 AM - 4:00 PM)
-            <div style="margin-top: 0.5rem; font-size: 0.9rem;">
-                Current time: ${new Date().toLocaleTimeString()} | 
-                Business hours: 8:00 AM - 4:00 PM
-            </div>
-        </div>
-        ` : ''}
-        
-        <div class="filters-section">
-            <h3 style="margin-top: 0;">Filter Resources</h3>
-            <div class="filter-controls">
-                <select class="filter-select" onchange="updateFilter('classification', this.value)">
-                    ${classificationOptions.map(opt => 
-                        `<option value="${opt.value}" ${filters.classification === opt.value ? 'selected' : ''}>
-                            ${opt.label}
-                        </option>`
-                    ).join('')}
-                </select>
-                
-                <input type="text" 
-                       class="search-box" 
-                       placeholder="Search by title or description..." 
-                       oninput="updateFilter('search', this.value)"
-                       value="${filters.search}">
-                
-                <button class="filter-button" onclick="applyFilters()">Apply Filters</button>
-            </div>
-            
-            <div style="margin-top: 1rem; font-size: 0.9rem; color: #666;">
-                <strong>Filter Legend:</strong>
-                <span class="classification-badge classification-public" style="margin-left: 0.5rem;">PUBLIC</span> - All .gov users
-                <span class="classification-badge classification-department" style="margin-left: 0.5rem;">DEPARTMENT</span> - ${currentUser.department} only
-                ${currentUser.department === 'MOD' &&  
- (currentUser.clearance_level.toUpperCase() === 'SECRET' || 
-  currentUser.clearance_level.toUpperCase() === 'TOP_SECRET') ? 
-                    `<span class="classification-badge classification-top-secret" style="margin-left: 0.5rem;">TOP SECRET</span> - MOD only (8AM-4PM)` : 
-                    ''}
-            </div>
-        </div>
-        
-        <div class="resource-stats" style="margin-bottom: 1rem; padding: 1rem; background: #f5f5f5; border-radius: 5px;">
-            <strong>${filteredResources.length}</strong> resources found
-            ${filters.classification !== 'all' ? 
-                `• Showing: <strong>${classificationOptions.find(o => o.value === filters.classification).label}</strong>` : 
-                ''}
-            ${filters.search ? `• Search: <strong>"${filters.search}"</strong>` : ''}
-        </div>
-        
-        ${filteredResources.length === 0 ? `
-        <div style="text-align: center; padding: 3rem; background: white; border-radius: 10px; border: 2px dashed #ddd;">
-            <h3 style="color: #666;">No resources found</h3>
-            <p>Try adjusting your filters or check your access permissions</p>
-            <button onclick="resetFilters()" style="background: #1a237e; color: white; border: none; padding: 0.5rem 1rem; border-radius: 5px; cursor: pointer; margin-top: 1rem;">
-                Reset Filters
-            </button>
-        </div>
-        ` : `
-        <div class="resource-grid">
-            ${filteredResources.map(resource => renderResourceCard(resource)).join('')}
-        </div>
-        `}
-    `;
-}
-
-function filterResources() {
-    console.log('Filtering with:', filters);
-    console.log('Total resources:', resources.length);
-    
-    const filtered = resources.filter(resource => {
-        // Classification filter - use tier instead of classification
-        if (filters.classification !== 'all' && resource.tier !== filters.classification) {
-            console.log(`Skipping ${resource.name} - tier ${resource.tier} doesn't match ${filters.classification}`);
-            return false;
-        }
-        
-        // Search filter - search by name or description
-        if (filters.search) {
-            const searchLower = filters.search.toLowerCase();
-            const resourceName = resource.name || resource.title || '';
-            const resourceDesc = resource.description || '';
-            
-            const matches = resourceName.toLowerCase().includes(searchLower) || 
-                   resourceDesc.toLowerCase().includes(searchLower);
-            
-            if (!matches) {
-                console.log(`Skipping ${resource.name} - doesn't match search "${filters.search}"`);
-            }
-            return matches;
-        }
-        
-        return true;
-    });
-    
-    console.log(`Filtered to ${filtered.length} resources`);
-    return filtered;
-}
-
-function renderResourceCard(resource) {
-    // Use resource.tier instead of resource.classification
-    let classificationClass = 'classification-public';
-    let classificationText = 'PUBLIC';
-    
-    if (resource.tier === 'DEPARTMENT') {
-        classificationClass = 'classification-department';
-        classificationText = 'DEPARTMENT';
-    } else if (resource.tier === 'TOP_SECRET') {
-        classificationClass = 'classification-top-secret';
-        classificationText = 'TOP SECRET';
-    }
-    
-    // Generate a description if not present
-    const description = resource.description || `${resource.name} - ${classificationText} government document`;
-    
-    // Check if user can access this resource
-    const canAccess = checkAccessPermission(resource);
-    const currentHour = new Date().getHours();
-    const isBusinessHours = currentHour >= 8 && currentHour < 16;
-    
-    // Determine button text and state
-    let buttonText = '📄 View Resource';
-    let buttonDisabled = false;
-    let buttonClass = '';
-    
-    if (!canAccess) {
-        buttonText = '🚫 Access Denied';
-        buttonDisabled = true;
-        buttonClass = 'access-denied';
-    } else if (resource.tier === 'TOP_SECRET' && !isBusinessHours) {
-        buttonText = '⏰ Time Restricted';
-        buttonDisabled = true;
-        buttonClass = 'access-pending';
-    }
-    
-    return `
-        <div class="resource-card">
-            <div class="resource-header">
-                <h3 class="resource-title">${resource.name || resource.title}</h3>
-                <span class="classification-badge ${classificationClass}">
-                    ${classificationText}
-                </span>
-            </div>
-            
-            <div class="resource-info">
-                <p>${description}</p>
-                
-                <div class="info-row">
-                    <span class="info-label">Department:</span>
-                    <span style="font-weight: bold; color: ${resource.department === currentUser.department ? '#2196f3' : '#666'}">
-                        ${resource.department}
-                        ${resource.department === currentUser.department ? ' (Your Dept)' : ''}
-                    </span>
+        <div class="page-header">
+            <div class="page-header-inner">
+                <div>
+                    <div class="page-eyebrow">Resource Portal</div>
+                    <h1 class="page-title">${currentUser.department} Document Library</h1>
+                    <p class="page-subtitle">Access documents based on your clearance and department</p>
                 </div>
-                
-                <div class="info-row">
-                    <span class="info-label">Classification:</span>
-                    <span>${resource.tier}</span>
-                </div>
-                
-                ${resource.restricted ? `
-                <div class="info-row">
-                    <span class="info-label">Status:</span>
-                    <span style="color: #f44336; font-weight: bold;">⏰ Time Restricted</span>
-                </div>
-                ` : ''}
-            </div>
-            
-            <button class="action-button ${buttonClass}" 
-                    onclick="requestResourceAccess(${resource.id})"
-                    ${buttonDisabled ? 'disabled' : ''}>
-                ${buttonText}
-            </button>
-            
-            ${!canAccess || (resource.tier === 'TOP_SECRET' && !isBusinessHours) ? `
-            <p style="color: #666; font-size: 0.9rem; margin-top: 0.5rem; padding: 0.5rem; background: #f9f9f9; border-radius: 3px;">
-                ${getAccessDeniedReason(resource)}
-            </p>
-            ` : ''}
-        </div>
-    `;
-}
-
-// Check if user can access resource
-function checkAccessPermission(resource) {
-    const userClearance = currentUser.clearance_level.toUpperCase();
-    
-    // PUBLIC: Everyone can access
-    if (resource.tier === 'PUBLIC') {
-        return true;
-    }
-    
-    // DEPARTMENT: Only same department
-    if (resource.tier === 'DEPARTMENT') {
-        return resource.department === currentUser.department;
-    }
-    
-    // TOP_SECRET: Check multiple conditions
-    if (resource.tier === 'TOP_SECRET') {
-        // 1. Must be MOD department
-        if (resource.department !== 'MOD') {
-            return false;
-        }
-        
-        // 2. User must be MOD department
-        if (currentUser.department !== 'MOD') {
-            return false;
-        }
-        
-        // 3. Must have SECRET or TOP_SECRET clearance (case-insensitive)
-        if (userClearance !== 'SECRET' && userClearance !== 'TOP_SECRET') {
-            return false;
-        }
-        
-        // 4. Check time restriction (8 AM - 4 PM)
-        const currentHour = new Date().getHours();
-        if (currentHour < 8 || currentHour >= 16) {
-            return false;
-        }
-        
-        return true;
-    }
-    
-    return false;
-}
-
-
-// Get reason for access denial
-function getAccessDeniedReason(resource) {
-    const userClearance = currentUser.clearance_level.toUpperCase();
-    
-    if (resource.tier === 'DEPARTMENT') {  // ← Change from classification to tier
-        if (resource.department !== currentUser.department) {
-            return `🔒 Department restricted: ${resource.department} personnel only`;
-        }
-    }
-    
-    if (resource.tier === 'TOP_SECRET') {  // ← Change from classification to tier
-        if (resource.department !== 'MOD') {
-            return '🔒 TOP SECRET resources are MOD department only';
-        }
-        
-        if (currentUser.department !== 'MOD') {
-            return '🔒 TOP SECRET access requires MOD department assignment';
-        }
-        
-        if (userClearance !== 'TOP_SECRET') {
-            return `🔒 TOP SECRET clearance required (Your clearance: ${currentUser.clearance_level})`;
-        }
-        
-        const currentHour = new Date().getHours();
-        if (currentHour < 8 || currentHour >= 16) {
-            return `🕐 Access restricted to business hours (8:00 AM - 4:00 PM). Current time: ${new Date().toLocaleTimeString()}`;
-        }
-    }
-    
-    return 'Access denied by security policy';
-}
-
-// Update filter values
-function updateFilter(type, value) {
-     filters[type] = value;
-    
-    renderPortal();
-}
-// Apply filters and re-render
-function applyFilters() {
-    renderPortal();
-}
-
-// Reset all filters
-function resetFilters() {
-    filters = {
-        classification: 'all',
-        search: ''
-    };
-    renderPortal();
-}
-
-// Request resource access
-async function requestResourceAccess(resourceId) {
-    try {
-        const token = localStorage.getItem('access_token');
-        
-        // Show loading on button
-        const button = event.target;
-        const originalText = button.innerText;
-        button.innerText = '⏳ Loading...';
-        button.disabled = true;
-        
-        const browserPublicKey = window.ztaEncryptor?.userPublicKey || null;
-
-        const response = await fetch(`/api/resources/${resourceId}/access`, {
-            method: 'POST',
-            headers: { 
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                browser_public_key: browserPublicKey
-            })
-        });
-        
-        if (!response.ok) {
-            const error = await response.json();
-            alert(`Access denied: ${error.message}`);
-            button.innerText = originalText;
-            button.disabled = false;
-            return;
-        }
-        
-        const result = await response.json();
-        
-        // Check if we got an encrypted response
-        if (result.encrypted_response) {
-            // Create and show a modal with the loader
-            showResourceModal(resourceId, result.encrypted_response);
-        }
-        
-        button.innerText = originalText;
-        button.disabled = false;
-        
-    } catch (error) {
-        console.error('Access request error:', error);
-        alert('Error requesting access');
-    }
-}
-
-
-function showResourceModal(resourceId, encryptedResponse) {
-    // Create modal HTML
-    const modalHtml = `
-        <div id="resource-modal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:10000; display:flex; align-items:center; justify-content:center;">
-            <div style="background:white; width:80%; max-width:800px; max-height:80vh; border-radius:10px; overflow:hidden;">
-                <div style="background:#1a237e; color:white; padding:1rem; display:flex; justify-content:space-between; align-items:center;">
-                    <h3 style="margin:0;">Loading Resource...</h3>
-                    <button onclick="document.getElementById('resource-modal').remove()" style="background:none; border:none; color:white; font-size:1.5rem; cursor:pointer;">&times;</button>
-                </div>
-                <div style="padding:2rem; max-height:70vh; overflow-y:auto;" id="modal-content">
-                    <div class="text-center">
-                        <div class="spinner-border text-primary" role="status">
-                            <span class="visually-hidden">Loading...</span>
+                <div class="portal-chips">
+                    <div class="portal-banner">
+                        <div>
+                            <div class="portal-banner-title">Secure Access</div>
+                            <div class="portal-banner-sub">All requests are end-to-end encrypted</div>
                         </div>
-                        <p>Decrypting resource...</p>
+                        <div class="portal-chips">
+                            <div class="access-chip">◈ ${currentUser.clearance_level}</div>
+                            <div class="access-chip">${currentUser.department}</div>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
+
+        ${showTS && !bizHours ? `
+        <div class="time-notice">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <strong>Outside Business Hours:</strong>&nbsp;TOP SECRET documents require access between 08:00–16:00. Current time: ${new Date().toLocaleTimeString()}.
+        </div>
+        ` : ''}
+
+        <div class="filter-bar">
+            <span class="filter-label">Filter</span>
+            <div class="filter-tabs">
+                ${clOptions.map(o => `<button class="filter-tab ${filters.classification===o.v?'active':''}" onclick="setFilter('${o.v}')">${o.l}</button>`).join('')}
+            </div>
+            <div class="filter-search">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="text" placeholder="Search by title or description…" oninput="setSearch(this.value)" value="${escapeHtml(filters.search)}">
+            </div>
+        </div>
+
+        <div class="results-meta">
+            <span class="results-count">${filtered.length}</span> resources found
+            ${filters.classification !== 'all' ? `· <span>${clOptions.find(o=>o.v===filters.classification)?.l}</span>` : ''}
+            ${filters.search ? `· matching "<strong>${escapeHtml(filters.search)}</strong>"` : ''}
+        </div>
+
+        ${filtered.length === 0
+            ? `<div class="empty-resources">
+                <div class="empty-icon">📂</div>
+                <div class="empty-title">No resources found</div>
+                <div class="empty-sub">Adjust your filters or check access permissions</div>
+                <button onclick="resetFilters()" class="btn btn-secondary btn-sm">Reset Filters</button>
+               </div>`
+            : `<div class="resource-grid">${filtered.map(r => renderCard(r)).join('')}</div>`
+        }
     `;
-    
-    // Add modal to page
-    document.body.insertAdjacentHTML('beforeend', modalHtml);
-    
-    // Decrypt and display in modal
+}
+
+function renderCard(r) {
+    const tierMap = { PUBLIC:['tier-public','PUBLIC'], DEPARTMENT:['tier-department','DEPT'], TOP_SECRET:['tier-top_secret','TOP SECRET'] };
+    const [tierCls, tierLabel] = tierMap[r.tier] || tierMap.PUBLIC;
+    const canAccess = checkAccess(r);
+    const hour = new Date().getHours();
+    const bizHours = hour >= 8 && hour < 16;
+    const deptMatch = r.department === currentUser.department;
+
+    let btnCls = 'btn-access-denied', btnLabel = '🔒 Restricted';
+    if (canAccess && !(r.tier === 'TOP_SECRET' && !bizHours)) {
+        btnCls = 'btn-access-open'; btnLabel = 'View Document';
+    } else if (r.tier === 'TOP_SECRET' && !bizHours && canAccess) {
+        btnCls = 'btn-access-time'; btnLabel = '⏱ Time Restricted';
+    }
+    const disabled = btnCls !== 'btn-access-open' ? 'disabled' : '';
+
+    return `<div class="resource-card">
+        <div class="resource-card-top">
+            <h4 class="resource-card-title">${escapeHtml(r.name || r.title)}</h4>
+            <span class="tier-badge ${tierCls}">${tierLabel}</span>
+        </div>
+        <div class="resource-desc">${escapeHtml(r.description || '')}</div>
+        <div class="resource-card-meta">
+            <div class="resource-meta-row">
+                <span class="resource-meta-key">Department</span>
+                <span class="${deptMatch ? 'dept-match' : ''}">${escapeHtml(r.department)}${deptMatch ? ' ✓' : ''}</span>
+            </div>
+            <div class="resource-meta-row">
+                <span class="resource-meta-key">Classification</span>
+                <span>${escapeHtml(r.tier)}</span>
+            </div>
+        </div>
+        <div class="resource-card-action">
+            <button class="btn-access ${btnCls}" onclick="requestAccess(${r.id}, event)" ${disabled}>
+                ${btnLabel}
+            </button>
+            ${!canAccess || (r.tier === 'TOP_SECRET' && !bizHours) ? `<div class="access-reason">${escapeHtml(getDeniedReason(r))}</div>` : ''}
+        </div>
+    </div>`;
+}
+
+function checkAccess(r) {
+    const cl = currentUser.clearance_level.toUpperCase();
+    if (r.tier === 'PUBLIC') return true;
+    if (r.tier === 'DEPARTMENT') return r.department === currentUser.department;
+    if (r.tier === 'TOP_SECRET') {
+        if (r.department !== 'MOD' || currentUser.department !== 'MOD') return false;
+        if (cl !== 'SECRET' && cl !== 'TOP_SECRET') return false;
+        const h = new Date().getHours(); return h >= 8 && h < 16;
+    }
+    return false;
+}
+
+function getDeniedReason(r) {
+    const cl = currentUser.clearance_level.toUpperCase();
+    if (r.tier === 'DEPARTMENT' && r.department !== currentUser.department)
+        return `Department restricted — ${r.department} personnel only`;
+    if (r.tier === 'TOP_SECRET') {
+        if (currentUser.department !== 'MOD') return 'Requires MOD department assignment';
+        if (cl !== 'SECRET' && cl !== 'TOP_SECRET') return `Requires SECRET clearance (current: ${currentUser.clearance_level})`;
+        const h = new Date().getHours();
+        if (h < 8 || h >= 16) return `Access permitted 08:00–16:00 only`;
+    }
+    return 'Access denied by security policy';
+}
+
+function getFiltered() {
+    return resources.filter(r => {
+        if (filters.classification !== 'all' && r.tier !== filters.classification) return false;
+        if (filters.search) {
+            const q = filters.search.toLowerCase();
+            return (r.name||r.title||'').toLowerCase().includes(q) || (r.description||'').toLowerCase().includes(q);
+        }
+        return true;
+    });
+}
+
+function setFilter(v) { filters.classification = v; renderPortal(); }
+function setSearch(v) { filters.search = v; renderPortal(); }
+function resetFilters() { filters = { classification:'all', search:'' }; renderPortal(); }
+
+async function requestAccess(resourceId, evt) {
+    const btn = evt.currentTarget;
+    btn.textContent = '…'; btn.disabled = true;
+
+    try {
+        const token = localStorage.getItem('access_token');
+        const res = await fetch(`/api/resources/${resourceId}/access`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ browser_public_key: window.ztaEncryptor?.userPublicKey || null })
+        });
+
+        if (!res.ok) {
+            const err = await res.json();
+            alert('Access denied: ' + (err.message || 'Unknown error'));
+            btn.textContent = 'View Document'; btn.disabled = false; return;
+        }
+
+        const result = await res.json();
+        if (result.encrypted_response) showModal(resourceId, result.encrypted_response);
+        btn.textContent = 'View Document'; btn.disabled = false;
+    } catch(e) {
+        alert('Error: ' + e.message);
+        btn.textContent = 'View Document'; btn.disabled = false;
+    }
+}
+
+function showModal(resourceId, encryptedResponse) {
+    document.getElementById('resourcePortal').insertAdjacentHTML('afterend', `
+        <div class="modal-overlay" id="res-modal" onclick="closeModal(event)">
+            <div class="modal-box" onclick="event.stopPropagation()">
+                <div class="modal-head">
+                    <div>
+                        <div class="modal-head-title">Classified Document</div>
+                        <div class="modal-head-sub">End-to-end encrypted via ZTA flow</div>
+                    </div>
+                    <button class="modal-close" onclick="document.getElementById('res-modal').remove()">✕</button>
+                </div>
+                <div class="modal-body" id="modal-body">
+                    <div class="modal-loading">
+                        <div class="zta-spinner"></div>
+                        Decrypting response…
+                    </div>
+                </div>
+            </div>
+        </div>
+    `);
+
     (async () => {
         try {
-            // Ensure encryption is initialized
-            if (!window.ztaEncryptor) {
-                throw new Error('ZTA encryption not loaded');
-            }
-            
-            if (!window.ztaEncryptor.initialized) {
-                console.log('Waiting for encryption initialization...');
-                await window.ztaEncryptor.init();
-            }
-            
-            if (!window.ztaEncryptor.initialized) {
-                throw new Error('Encryption initialization failed');
-            }
-            
-            console.log('🔐 Attempting to decrypt resource...');
-            const decrypted = await window.ztaEncryptor.decryptFromAgent(encryptedResponse);
-            console.log('✅ Decryption successful:', decrypted);
-            
-            if (!decrypted.allowed) {
-                throw new Error(decrypted.reason || 'Access denied');
-            }
-            
-            let resourceData = null;
-            if (decrypted.api_response && decrypted.api_response.data) {
-                resourceData = decrypted.api_response.data;
-            } else if (decrypted.id || decrypted.name) {
-                resourceData = decrypted;
-            }
-            
-            if (!resourceData) {
-                console.error('❌ Could not find resource data in response:', decrypted);
-                throw new Error('No resource data found');
-            }
-            
-            // Display resource in modal
-            document.getElementById('modal-content').innerHTML = `
-                <h2>${escapeHtml(resourceData.name || resourceData.title || 'Resource')}</h2>
-                <p><strong>Department:</strong> ${escapeHtml(resourceData.department || 'Unknown')}</p>
-                <p><strong>Classification:</strong> ${escapeHtml(resourceData.tier || resourceData.classification || 'Unknown')}</p>
-                <hr>
-                <p>${escapeHtml(resourceData.content || 'No content available')}</p>
-            
-                
-                <div class="mt-3 text-muted small">
-                    <strong>ZTA Context:</strong> End-to-end encrypted | Trace ID: ${escapeHtml(decrypted.request_id || 'N/A')}
+            if (!window.ztaEncryptor?.initialized) await window.ztaEncryptor.init();
+            const dec = await window.ztaEncryptor.decryptFromAgent(encryptedResponse);
+            if (!dec.allowed) throw new Error(dec.reason || 'Access denied');
+            const rd = dec.api_response?.data || (dec.id ? dec : null);
+            if (!rd) throw new Error('No resource data in response');
+
+            document.getElementById('modal-body').innerHTML = `
+                <div class="modal-field">
+                    <div class="modal-field-label">Document</div>
+                    <div class="modal-field-value" style="font-family:'IBM Plex Serif',serif;font-size:18px;font-weight:600;color:var(--navy)">${escapeHtml(rd.name||rd.title||'Document')}</div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+                    <div class="modal-field" style="margin:0">
+                        <div class="modal-field-label">Department</div>
+                        <div class="modal-field-value">${escapeHtml(rd.department||'—')}</div>
+                    </div>
+                    <div class="modal-field" style="margin:0">
+                        <div class="modal-field-label">Classification</div>
+                        <div class="modal-field-value">${escapeHtml(rd.tier||rd.classification||'—')}</div>
+                    </div>
+                </div>
+                <div class="modal-field">
+                    <div class="modal-field-label">Content</div>
+                    <div class="modal-content-body">${escapeHtml(rd.content||'No content available')}</div>
+                </div>
+                <div class="zta-context-bar">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L4 6v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V6l-8-4z"/></svg>
+                    ZTA verified · End-to-end encrypted · Trace: <code style="background:rgba(5,150,105,0.1);border-color:transparent">${escapeHtml(dec.request_id||'N/A')}</code>
                 </div>
             `;
-            
-        } catch (error) {
-            console.error('❌ Modal decryption error:', error);
-            document.getElementById('modal-content').innerHTML = `
+        } catch(e) {
+            document.getElementById('modal-body').innerHTML = `
                 <div class="alert alert-danger">
-                    <h4>❌ Access Denied</h4>
-                    <p>${error.message}</p>
-                    <button onclick="document.getElementById('resource-modal').remove()" class="btn btn-secondary mt-2">Close</button>
+                    <strong>Access Denied</strong><br>${escapeHtml(e.message)}
                 </div>
             `;
         }
     })();
 }
 
-// Add escapeHtml function if not present
-function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+function closeModal(e) {
+    const m = document.getElementById('res-modal');
+    if (m && e.target === m) m.remove();
 }
 
+function escapeHtml(t) {
+    if (!t) return '';
+    const d = document.createElement('div');
+    d.textContent = t;
+    return d.innerHTML;
+}
 
-// Initialize portal
 document.addEventListener('DOMContentLoaded', loadResourcePortal);
 </script>
 {% endblock %}

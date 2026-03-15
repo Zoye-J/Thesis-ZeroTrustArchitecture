@@ -1,124 +1,361 @@
 {% extends "base.html" %}
+{% block title %}Sign In — ZTA Government System{% endblock %}
 
-{% block title %}Login - ZTA System{% endblock %}
+{% block extra_css %}
+<style>
+    .login-split {
+        min-height: calc(100vh - 64px);
+        display: grid;
+        grid-template-columns: 1fr 440px 1fr;
+        align-items: center;
+        padding: 40px 24px;
+        gap: 0;
+    }
+
+    .login-panel {
+        grid-column: 2;
+        background: var(--white);
+        border: 1px solid var(--divider);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-lg);
+        overflow: hidden;
+    }
+
+    .login-panel-top {
+        background: var(--navy);
+        padding: 28px 32px 24px;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .login-panel-top::before {
+        content: '';
+        position: absolute;
+        top: -40px; right: -40px;
+        width: 160px; height: 160px;
+        border-radius: 50%;
+        background: rgba(255,255,255,0.04);
+    }
+
+    .login-panel-top::after {
+        content: '';
+        position: absolute;
+        bottom: -30px; left: 20px;
+        width: 100px; height: 100px;
+        border-radius: 50%;
+        background: rgba(255,255,255,0.03);
+    }
+
+    .login-flag {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 16px;
+    }
+
+    .login-flag-line {
+        height: 3px;
+        flex: 1;
+        background: rgba(255,255,255,0.15);
+        border-radius: 2px;
+    }
+
+    .login-flag-text {
+        font-size: 9px;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: rgba(255,255,255,0.5);
+        font-family: 'IBM Plex Mono', monospace;
+        white-space: nowrap;
+    }
+
+    .login-title {
+        font-family: 'IBM Plex Serif', serif;
+        font-size: 20px;
+        font-weight: 600;
+        color: white;
+        margin-bottom: 4px;
+    }
+
+    .login-subtitle {
+        font-size: 12px;
+        color: rgba(255,255,255,0.55);
+        letter-spacing: 0.04em;
+    }
+
+    .login-form-body { padding: 28px 32px 32px; }
+
+    .input-group-zta {
+        position: relative;
+        margin-bottom: 16px;
+    }
+
+    .input-group-zta label {
+        display: block;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--slate-mid);
+        margin-bottom: 6px;
+        font-family: 'IBM Plex Mono', monospace;
+    }
+
+    .input-group-zta input {
+        width: 100%;
+        padding: 10px 14px;
+        border: 1px solid var(--divider);
+        border-radius: var(--radius);
+        font-size: 14px;
+        font-family: 'IBM Plex Sans', sans-serif;
+        color: var(--slate);
+        background: var(--white);
+        outline: none;
+        transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    .input-group-zta input:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(23,87,194,0.10);
+    }
+
+    .input-group-zta input::placeholder { color: #d1d5db; }
+
+    .btn-sign-in {
+        width: 100%;
+        padding: 11px;
+        background: var(--navy);
+        color: white;
+        border: none;
+        border-radius: var(--radius);
+        font-size: 14px;
+        font-weight: 500;
+        font-family: 'IBM Plex Sans', sans-serif;
+        cursor: pointer;
+        margin-top: 8px;
+        transition: background 0.15s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+    }
+
+    .btn-sign-in:hover { background: #0a1d36; }
+    .btn-sign-in:disabled { background: var(--slate-lt); cursor: not-allowed; }
+
+    .login-divider {
+        border: none;
+        border-top: 1px solid var(--divider);
+        margin: 20px 0;
+    }
+
+    .register-cta {
+        background: var(--surface);
+        border: 1px solid var(--divider);
+        border-radius: var(--radius);
+        padding: 16px;
+        text-align: center;
+    }
+
+    .register-cta p {
+        font-size: 12px;
+        color: var(--slate-mid);
+        margin-bottom: 10px;
+    }
+
+    .btn-register {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 18px;
+        background: var(--white);
+        border: 1px solid var(--divider);
+        border-radius: var(--radius);
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--slate);
+        cursor: pointer;
+        text-decoration: none;
+        transition: all 0.15s;
+    }
+
+    .btn-register:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-lt); }
+
+    .test-users {
+        margin-top: 16px;
+        padding: 14px;
+        background: var(--surface);
+        border: 1px solid var(--divider);
+        border-radius: var(--radius);
+    }
+
+    .test-users-title {
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--slate-lt);
+        font-family: 'IBM Plex Mono', monospace;
+        margin-bottom: 8px;
+    }
+
+    .test-user-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 4px 0;
+        font-size: 12px;
+        border-bottom: 1px solid var(--divider);
+        cursor: pointer;
+        transition: background 0.1s;
+        border-radius: 4px;
+        padding: 4px 6px;
+    }
+
+    .test-user-row:last-child { border-bottom: none; }
+    .test-user-row:hover { background: var(--navy-soft); }
+
+    .test-user-name { font-weight: 500; color: var(--slate); }
+    .test-user-cred { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--slate-lt); }
+
+    .msg-box {
+        border-radius: var(--radius);
+        padding: 10px 14px;
+        font-size: 12px;
+        margin-top: 12px;
+        display: none;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .msg-box.show { display: flex; }
+    .msg-box.loading { background: var(--accent-lt); color: var(--accent); }
+    .msg-box.success { background: var(--green-lt); color: var(--green); }
+    .msg-box.error { background: var(--red-lt); color: var(--red); }
+</style>
+{% endblock %}
 
 {% block content %}
-<div class="login-container" style="max-width: 400px; margin: 0 auto;">
-    <h2 style="text-align: center; margin-bottom: 2rem; color: #2c3e50;">🔐 Login to ZTA System</h2>
-    
-    <form id="loginForm" style="display: flex; flex-direction: column; gap: 1rem;">
-        <div class="form-group">
-            <label for="username" style="display: block; margin-bottom: 0.5rem; font-weight: bold;">Username</label>
-            <input type="text" id="username" name="username" required 
-                   style="width: 100%; padding: 0.8rem; border: 2px solid #ddd; border-radius: 5px; font-size: 1rem;">
+<div class="login-split">
+    <div class="login-panel">
+        <div class="login-panel-top">
+            <div class="login-flag">
+                <div class="login-flag-line"></div>
+                <span class="login-flag-text">People's Republic of Bangladesh</span>
+                <div class="login-flag-line"></div>
+            </div>
+            <div class="login-title">Zero Trust Authentication</div>
+            <div class="login-subtitle">Secure government portal — authorized personnel only</div>
         </div>
-        
-        <div class="form-group">
-            <label for="password" style="display: block; margin-bottom: 0.5rem; font-weight: bold;">Password</label>
-            <input type="password" id="password" name="password" required 
-                   style="width: 100%; padding: 0.8rem; border: 2px solid #ddd; border-radius: 5px; font-size: 1rem;">
+
+        <div class="login-form-body">
+            <form id="loginForm">
+                <div class="input-group-zta">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" name="username" required autocomplete="username" placeholder="Enter your username">
+                </div>
+
+                <div class="input-group-zta">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" required autocomplete="current-password" placeholder="••••••••">
+                </div>
+
+                <button type="submit" class="btn-sign-in" id="submitBtn">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L4 6v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V6l-8-4z"/></svg>
+                    Sign In Securely
+                </button>
+
+                <div class="msg-box" id="msgBox"></div>
+            </form>
+
+            <hr class="login-divider">
+
+            <div class="register-cta">
+                <p>Government employee without an account?</p>
+                <a href="/register" class="btn-register">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
+                    Register with .gov Email
+                </a>
+            </div>
+
+            <div class="test-users">
+                <div class="test-users-title">Development Test Accounts</div>
+                <div class="test-user-row" onclick="fillLogin('testuser','testpass123')">
+                    <span class="test-user-name">testuser <span style="font-size:10px;color:var(--slate-lt)">MOD · SECRET</span></span>
+                    <span class="test-user-cred">testuser / testpass123</span>
+                </div>
+                <div class="test-user-row" onclick="fillLogin('testuser2','testpass123')">
+                    <span class="test-user-name">testuser2 <span style="font-size:10px;color:var(--slate-lt)">MOF · CONFIDENTIAL</span></span>
+                    <span class="test-user-cred">testuser2 / testpass123</span>
+                </div>
+                <div class="test-user-row" onclick="fillLogin('testuser3','testpass123')">
+                    <span class="test-user-name">testuser3 <span style="font-size:10px;color:var(--slate-lt)">NSA · BASIC</span></span>
+                    <span class="test-user-cred">testuser3 / testpass123</span>
+                </div>
+            </div>
         </div>
-        
-        <button type="submit" 
-                style="background: #3498db; color: white; border: none; padding: 1rem; border-radius: 5px; font-size: 1rem; cursor: pointer; font-weight: bold;">
-            Login
-        </button>
-    </form>
-    
-    <div style="margin-top: 2rem; padding: 1.5rem; background: #f8f9fa; border-radius: 10px;">
-        <h3 style="color: #1a237e; margin-bottom: 1rem; text-align: center;">Government Employee Registration</h3>
-        <p style="text-align: center; margin-bottom: 1rem; color: #666;">
-            Register using your official government email address.
-        </p>
-        <div style="text-align: center;">
-            <button onclick="window.location.href='/register'" 
-                    style="background: #1a237e; color: white; border: none; padding: 0.75rem 1.5rem; 
-                        border-radius: 5px; cursor: pointer; font-weight: bold;">
-                Register Now
-            </button>
-        </div>
-    </div>
-    
-    <div id="message" style="margin-top: 1rem;"></div>
-    
-    <div style="margin-top: 2rem; padding: 1rem; background: #f8f9fa; border-radius: 5px; font-size: 0.9rem;">
-        <h3 style="color: #2c3e50; margin-bottom: 0.5rem;">Test Users:</h3>
-        <ul style="list-style: none;">
-            <li><strong>Superadmin:</strong> admin / Admin123</li>
-            <li><strong>Admin (Finance):</strong> fin_admin / Admin123</li>
-            <li><strong>User (Finance):</strong> fin_user / User123</li>
-        </ul>
     </div>
 </div>
 
 <script>
+function fillLogin(u, p) {
+    document.getElementById('username').value = u;
+    document.getElementById('password').value = p;
+}
+
+function setMsg(msg, type) {
+    const box = document.getElementById('msgBox');
+    box.textContent = msg;
+    box.className = 'msg-box show ' + type;
+}
+
 document.getElementById('loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    
-    const username = document.getElementById('username').value;
-    const password = document.getElementById('password').value;
-    const messageDiv = document.getElementById('message');
-    
-    messageDiv.innerHTML = '<div style="background: #d1ecf1; color: #0c5460; padding: 10px; border-radius: 5px; margin: 10px 0;">🔄 Logging in...</div>';
-    
+    const btn = document.getElementById('submitBtn');
+    btn.disabled = true;
+    setMsg('Authenticating…', 'loading');
+
     try {
-        // Step 1: Login
         const response = await fetch('/api/auth/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password })
+            body: JSON.stringify({
+                username: document.getElementById('username').value,
+                password: document.getElementById('password').value
+            })
         });
-        
+
         if (!response.ok) {
             const error = await response.json();
             throw new Error(error.error || 'Login failed');
         }
-        
+
         const data = await response.json();
-        console.log('Login successful:', data);
-        
-        // Step 2: Store token
         localStorage.setItem('access_token', data.access_token);
-        
-        // Step 3: CRITICAL - Load encryption keys
-        messageDiv.innerHTML = '<div style="background: #d1ecf1; color: #0c5460; padding: 10px; border-radius: 5px; margin: 10px 0;">🔑 Loading encryption keys...</div>';
-        
-        // Wait for ztaEncryptor
+        setMsg('Verified — loading encryption keys…', 'loading');
+
         let retries = 0;
         while (!window.ztaEncryptor && retries < 10) {
-            await new Promise(resolve => setTimeout(resolve, 500));
+            await new Promise(r => setTimeout(r, 500));
             retries++;
         }
-        
+
         if (window.ztaEncryptor) {
-            // Initialize encryption
             await window.ztaEncryptor.init();
-            
-            // Load keys from IndexedDB into the encryptor
-            const keyPair = await window.ztaAutomatedSetup.getStoredKeyPair();
+            const keyPair = await window.ztaAutomatedSetup?.getStoredKeyPair();
             if (keyPair) {
                 window.ztaEncryptor.userPrivateKey = keyPair.privateKey;
                 window.ztaEncryptor.userPublicKey = keyPair.publicKey;
-                console.log('✅ Keys loaded into encryptor');
-                console.log('Private key length:', keyPair.privateKey.length);
-            } else {
-                console.warn('⚠️ No keys found in IndexedDB');
             }
         }
-        
-        // Step 4: Redirect
-        messageDiv.innerHTML = '<div style="background: #d4edda; color: #155724; padding: 10px; border-radius: 5px; margin: 10px 0;">✅ Login successful! Redirecting...</div>';
-        
-        setTimeout(() => {
-            window.location.href = '/dashboard';
-        }, 1500);
-        
+
+        setMsg('✓ Authentication successful', 'success');
+        setTimeout(() => { window.location.href = '/dashboard'; }, 1200);
+
     } catch (error) {
-        console.error('Login error:', error);
-        messageDiv.innerHTML = `<div style="background: #f8d7da; color: #721c24; padding: 10px; border-radius: 5px; margin: 10px 0;">❌ Error: ${error.message}</div>`;
+        setMsg(error.message, 'error');
+        btn.disabled = false;
     }
 });
-
-console.log('Login page ready');
 </script>
 {% endblock %}
