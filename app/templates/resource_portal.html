@@ -676,12 +676,17 @@ async function requestResourceAccess(resourceId) {
         button.innerText = '⏳ Loading...';
         button.disabled = true;
         
+        const browserPublicKey = window.ztaEncryptor?.userPublicKey || null;
+
         const response = await fetch(`/api/resources/${resourceId}/access`, {
             method: 'POST',
             headers: { 
                 'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json'
-            }
+            },
+            body: JSON.stringify({
+                browser_public_key: browserPublicKey
+            })
         });
         
         if (!response.ok) {
@@ -778,8 +783,10 @@ function showResourceModal(resourceId, encryptedResponse) {
                 <p><strong>Classification:</strong> ${escapeHtml(resourceData.tier || resourceData.classification || 'Unknown')}</p>
                 <hr>
                 <p>${escapeHtml(resourceData.content || 'No content available')}</p>
+            
+                
                 <div class="mt-3 text-muted small">
-                    <strong>ZTA Context:</strong> End-to-end encrypted | Trace ID: ${escapeHtml(traceId)}
+                    <strong>ZTA Context:</strong> End-to-end encrypted | Trace ID: ${escapeHtml(decrypted.request_id || 'N/A')}
                 </div>
             `;
             

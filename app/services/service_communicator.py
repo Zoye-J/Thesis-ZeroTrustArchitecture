@@ -146,12 +146,23 @@ class EncryptedServiceCommunicator:
             logger.info(f"[{request_id}] Processing resource request: ID={resource_id}")
 
             # Get user's public key
-            user_public_key = self._get_user_public_key(user_claims.get("sub"))
+            request_body = flask_request.get_json(silent=True) or {}
+            user_public_key = request_body.get("browser_public_key")
+
             if not user_public_key:
-                logger.error(f"[{request_id}] No public key found for user")
-                return self._create_error_response(
-                    400, "User public key not found - ACCESS DENIED", request_id
+                logger.warning(
+                    f"[{request_id}] No browser public key sent — falling back to DB key"
                 )
+                user_public_key = self._get_user_public_key(user_claims.get("sub"))
+
+            if not user_public_key:
+                return self._create_error_response(
+                    400, "User public key not found", request_id
+                )
+
+            logger.info(
+                f"[{request_id}] Using public key source: {'browser IndexedDB' if request_body.get('browser_public_key') else 'database'}"
+            )
 
             # Build request for OPA Agent
             request_data = self._build_resource_request_data(

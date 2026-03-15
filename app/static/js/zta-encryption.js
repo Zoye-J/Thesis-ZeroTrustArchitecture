@@ -60,6 +60,7 @@ class ZTAEncryption {
             
             this.initialized = true;
             console.log('✅ ZTA Encryption initialized');
+            await this.testRSAKeyPair();
             return true;
             
         } catch (error) {
@@ -120,6 +121,53 @@ class ZTAEncryption {
         }
     }
     
+
+
+
+    async testRSAKeyPair() {
+        console.log("🧪 Testing RSA key pair...");
+
+        const message = "ZTA_TEST_MESSAGE";
+
+        const publicKey = await this.importPublicKey(this.userPublicKey);
+        const privateKey = await this.importPrivateKey(this.userPrivateKey);
+
+        const encoder = new TextEncoder();
+        const data = encoder.encode(message);
+
+        const encrypted = await crypto.subtle.encrypt(
+            { name: "RSA-OAEP" },
+            publicKey,
+            data
+        );
+
+        console.log("Encrypted length:", encrypted.byteLength);
+
+        const decrypted = await crypto.subtle.decrypt(
+            { name: "RSA-OAEP" },
+            privateKey,
+            encrypted
+        );
+
+        const decoder = new TextDecoder();
+        const result = decoder.decode(decrypted);
+
+        console.log("Decrypted message:", result);
+
+        if (result === message) {
+            console.log("✅ RSA KEYPAIR VALID");
+        } else {
+            console.log("❌ RSA KEYPAIR BROKEN");
+        }
+    }
+
+
+
+
+
+
+
+
     async hybridEncrypt(data) {
         // Hybrid encryption: RSA for key, AES for data
         const jsonString = JSON.stringify(data);
